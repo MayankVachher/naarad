@@ -1,0 +1,29 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Secrets — config.json holds tokens, API keys, chat_id
+config.json
+.env
+
+# Local SQLite state
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Runtime logs
+logs/
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

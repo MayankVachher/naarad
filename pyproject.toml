@@ -1,0 +1,38 @@
+[project]
+name = "naarad"
+version = "0.1.0"
+description = "Personal Telegram bot: daily brief, market open/close, escalating water reminders."
+authors = [
+    { name = "MayankVachher", email = "mayankv0207@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "python-telegram-bot[job-queue]>=21.6",
+    "apscheduler>=3.10",
+    "httpx>=0.27",
+    "pydantic>=2.8",
+    "tzdata>=2024.1",
+    "feedparser>=6.0",
+    "astral>=3.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "freezegun>=1.5",
+]
+
+[project.scripts]
+naarad = "naarad.bot:main"
+naarad-daily-brief = "naarad.jobs.daily_brief:main"
+naarad-market-open = "naarad.jobs.market_open:main"
+naarad-market-close = "naarad.jobs.market_close:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[build-system]
+requires = ["uv_build>=0.11.8,<0.12.0"]
+build-backend = "uv_build"

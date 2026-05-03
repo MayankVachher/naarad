@@ -1,0 +1,298 @@
+"""Scheduler glue tests: confirm/reminder/start_day flows with mocks.
+
+We don't spin up python-telegram-bot's full Application here. Instead we
+exercise `run_loop`, `start_day`, and `confirm_drink` against a fake
+Application that captures sends and scheduled jobs.
+"""
+from __future__ import annotations
+
+import asyncio
+from datetime import date, datetime
+from pathlib import Path
+from types import SimpleNamespace
+from zoneinfo import ZoneInfo
+
+import pytest
+
+from naarad import db
+from naarad.config import (
+    AnthropicConfig,
+    BriefConfig,
+    Config,
+    EodhdConfig,
+    MorningConfig,
+    SchedulesConfig,
+    TelegramConfig,
+    WaterConfig as ConfigWater,
+)
+from naarad.water import scheduler as water_scheduler
+from naarad.water.scheduler import water_config_from
+
+TZ = ZoneInfo("America/Toronto")
+
+
+def make_config(db_path: Path) -> Config:
+    return Config(
+        telegram=TelegramConfig(token="x", chat_id=1),
+        eodhd=EodhdConfig(api_key="x"),
+        anthropic=AnthropicConfig(api_key="x"),
+        timezone="America/Toronto",
+        water=ConfigWater(
+            active_end="21:00",
+            intervals_minutes=[120, 60, 30, 15, 5],
+        ),
+        brief=BriefConfig(),
+        morning=MorningConfig(),
+        tickers_default=[],
+        schedules=SchedulesConfig(),
+        db_path=str(db_path),
+    )
+
+
+class FakeBot:
+    def __init__(self) -> None:
+        self.sent: list[dict] = []
+        self._next_msg_id = 1000
+
+    async def send_message(self, *, chat_id, text, reply_markup=None):
+        msg_id = self._next_msg_id
+        self._next_msg_id += 1
+        self.sent.append({"chat_id": chat_id, "text": text, "message_id": msg_id})
+        return SimpleNamespace(message_id=msg_id)
+
+
+class FakeJobQueue:
+    def __init__(self) -> None:
+        self.scheduled: list[tuple[str, datetime]] = []
+        self.removed: list[str] = []
+
+    def get_jobs_by_name(self, name):
+        return []  # No persistence between schedule calls in this fake.
+
+    def run_once(self, callback, *, when, name):
+        self.scheduled.append((name, when))
+
+
+class FakeApp:
+    def __init__(self, config: Config) -> None:
+        self.bot = FakeBot()
+        self.job_queue = FakeJobQueue()
+        self.bot_data = {
+            "config": config,
+            "water_cfg": water_config_from(config),
+            "water_lock": asyncio.Lock(),
+        }
+
+
+@pytest.fixture
+def app(tmp_path: Path):
+    config = make_config(tmp_path / "test.db")
+    db.init_db(config.db_path)
+    return FakeApp(config)
+
+
+@pytest.fixture
+def freeze_now(monkeypatch):
+    """Replace scheduler._now() with a controllable clock."""
+    holder = {"now": datetime(2026, 5, 2, 10, 0, tzinfo=TZ)}
+
+    def _fake_now(tz):
+        return holder["now"].astimezone(tz)
+
+    monkeypatch.setattr(water_scheduler, "_now", _fake_now)
+    return holder
+
+
+# ---------- Day not started: kickoff is a no-op ----------
+
+@pytest.mark.asyncio
+async def test_kickoff_when_day_not_started_is_idle(app, freeze_now):
+    freeze_now["now"] = datetime(2026, 5, 2, 8, 30, tzinfo=TZ)
+    await water_scheduler.kickoff(app)
+    # No messages, no scheduled jobs.
+    assert app.bot.sent == []
+    assert app.job_queue.scheduled == []
+
+
+@pytest.mark.asyncio
+async def test_kickoff_when_yesterday_started_is_idle(app, freeze_now):
+    """day_started_on=yesterday must not fire today."""
+    cfg = app.bot_data["config"]
+    db.update_water_state(
+        cfg.db_path,
+        day_started_on=date(2026, 5, 1),
+        last_drink_at=datetime(2026, 5, 1, 18, 0, tzinfo=TZ),
+        level=2,
+    )
+    freeze_now["now"] = datetime(2026, 5, 2, 9, 0, tzinfo=TZ)
+    await water_scheduler.kickoff(app)
+    assert app.bot.sent == []
+    assert app.job_queue.scheduled == []
+
+
+# ---------- start_day: marks today and fires first reminder ----------
+
+@pytest.mark.asyncio
+async def test_start_day_marks_today_and_fires_first_reminder(app, freeze_now):
+    cfg = app.bot_data["config"]
+    freeze_now["now"] = datetime(2026, 5, 2, 8, 30, tzinfo=TZ)
+    await water_scheduler.start_day(app)
+
+    # day_started_on persisted.
+    state = db.get_water_state(cfg.db_path)
+    assert state["day_started_on"] == date(2026, 5, 2)
+
+    # First reminder (level 0) sent.
+    reminders = [m for m in app.bot.sent if "💧" in m["text"]]
+    assert len(reminders) == 1
+    assert reminders[0]["text"].startswith("💧 Time")
+
+    # Level bumped to 1 in DB; next reminder scheduled at 8:30 + 60min = 9:30.
+    state = db.get_water_state(cfg.db_path)
+    assert state["level"] == 1
+    assert app.job_queue.scheduled
+    name, when = app.job_queue.scheduled[-1]
+    assert name == water_scheduler.JOB_NAME
+    assert when == datetime(2026, 5, 2, 9, 30, tzinfo=TZ)
+
+
+@pytest.mark.asyncio
+async def test_start_day_idempotent_within_day(app, freeze_now):
+    """Calling start_day twice on the same day must NOT reset the chain back to
+    level 0 — the second call sees day_started_on==today and just continues.
+    """
+    cfg = app.bot_data["config"]
+    freeze_now["now"] = datetime(2026, 5, 2, 8, 30, tzinfo=TZ)
+    await water_scheduler.start_day(app)
+    # After the first start_day: level was bumped to 1 by the immediate Reminder(0).
+    state_after_first = db.get_water_state(cfg.db_path)
+    assert state_after_first["level"] == 1
+    assert state_after_first["last_drink_at"] is None  # never drank
+
+    # User confirms a drink, level resets to 0 with anchor=9:00.
+    freeze_now["now"] = datetime(2026, 5, 2, 9, 0, tzinfo=TZ)
+    await water_scheduler.confirm_drink(app)
+    state_after_drink = db.get_water_state(cfg.db_path)
+    assert state_after_drink["level"] == 0
+    assert state_after_drink["last_drink_at"] == datetime(2026, 5, 2, 9, 0, tzinfo=TZ)
+
+    # Spurious second start_day later in the morning — must NOT clobber.
+    freeze_now["now"] = datetime(2026, 5, 2, 10, 0, tzinfo=TZ)
+    await water_scheduler.start_day(app)
+    state_after_second = db.get_water_state(cfg.db_path)
+    # last_drink_at preserved, day_started_on still today.
+    assert state_after_second["last_drink_at"] == datetime(2026, 5, 2, 9, 0, tzinfo=TZ)
+    assert state_after_second["day_started_on"] == date(2026, 5, 2)
+
+
+# ---------- confirm flow ----------
+
+@pytest.mark.asyncio
+async def test_confirm_resets_level_and_schedules_2h_out(app, freeze_now):
+    cfg = app.bot_data["config"]
+    # Day already started + first reminder fired.
+    freeze_now["now"] = datetime(2026, 5, 2, 8, 30, tzinfo=TZ)
+    await water_scheduler.start_day(app)
+    app.bot.sent.clear()
+    app.job_queue.scheduled.clear()
+
+    freeze_now["now"] = datetime(2026, 5, 2, 10, 30, tzinfo=TZ)
+    await water_scheduler.confirm_drink(app)
+
+    state = db.get_water_state(cfg.db_path)
+    assert state["last_drink_at"] == datetime(2026, 5, 2, 10, 30, tzinfo=TZ)
+    assert state["level"] == 0
+    name, when = app.job_queue.scheduled[-1]
+    assert when == datetime(2026, 5, 2, 12, 30, tzinfo=TZ)
+
+
+@pytest.mark.asyncio
+async def test_confirm_before_day_start_is_silent(app, freeze_now):
+    """A /water confirm before the day starts updates state but doesn't
+    fire reminders — the next_action returns Idle.
+    """
+    cfg = app.bot_data["config"]
+    freeze_now["now"] = datetime(2026, 5, 2, 7, 0, tzinfo=TZ)  # before brief / before tap
+    await water_scheduler.confirm_drink(app)
+
+    # Confirm went through (state updated)…
+    state = db.get_water_state(cfg.db_path)
+    assert state["last_drink_at"] == datetime(2026, 5, 2, 7, 0, tzinfo=TZ)
+    # …but no reminder fired and nothing got scheduled.
+    reminders = [m for m in app.bot.sent if "💧" in m["text"]]
+    assert reminders == []
+    assert app.job_queue.scheduled == []
+
+
+# ---------- Recovery / stale callback semantics ----------
+
+@pytest.mark.asyncio
+async def test_overdue_reminder_at_startup_fires_once_at_current_level(app, freeze_now):
+    """Bot was scheduled to fire at 12:00 but didn't (crash); restarts at 13:00.
+
+    With the new design: day_started_on must be set already (from earlier today).
+    """
+    cfg = app.bot_data["config"]
+    db.update_water_state(
+        cfg.db_path,
+        day_started_on=date(2026, 5, 2),
+        last_drink_at=datetime(2026, 5, 2, 10, 0, tzinfo=TZ),
+        level=0,
+    )
+    freeze_now["now"] = datetime(2026, 5, 2, 13, 0, tzinfo=TZ)
+
+    await water_scheduler.kickoff(app)
+
+    # Exactly one reminder sent at level 0.
+    reminders = [m for m in app.bot.sent if "💧" in m["text"]]
+    assert len(reminders) == 1
+    assert reminders[0]["text"].startswith("💧 Time")
+    # Level bumped to 1; next reminder scheduled at 13:00 + 60min = 14:00.
+    state = db.get_water_state(cfg.db_path)
+    assert state["level"] == 1
+    name, when = app.job_queue.scheduled[-1]
+    assert when == datetime(2026, 5, 2, 14, 0, tzinfo=TZ)
+
+
+@pytest.mark.asyncio
+async def test_stale_callback_after_confirm_is_a_noop(app, freeze_now):
+    """Reminder job was scheduled for 12:00. User confirms at 11:59. Job fires at 12:00.
+
+    The state has been reset, so no escalation message goes out.
+    """
+    cfg = app.bot_data["config"]
+    db.update_water_state(
+        cfg.db_path,
+        day_started_on=date(2026, 5, 2),
+        last_drink_at=datetime(2026, 5, 2, 10, 0, tzinfo=TZ),
+        level=0,
+    )
+    freeze_now["now"] = datetime(2026, 5, 2, 11, 59, tzinfo=TZ)
+    await water_scheduler.confirm_drink(app)
+    app.bot.sent.clear()
+    app.job_queue.scheduled.clear()
+
+    freeze_now["now"] = datetime(2026, 5, 2, 12, 0, tzinfo=TZ)
+    await water_scheduler.run_loop(app)
+
+    # No reminder sent — confirm at 11:59 set last_drink_at, next due is 13:59.
+    reminders = [m for m in app.bot.sent if "💧" in m["text"]]
+    assert reminders == []
+    name, when = app.job_queue.scheduled[-1]
+    assert when == datetime(2026, 5, 2, 13, 59, tzinfo=TZ)
+
+
+@pytest.mark.asyncio
+async def test_after_active_end_is_idle(app, freeze_now):
+    """After 21:00 on a started day, run_loop is silent."""
+    cfg = app.bot_data["config"]
+    db.update_water_state(
+        cfg.db_path,
+        day_started_on=date(2026, 5, 2),
+        last_drink_at=datetime(2026, 5, 2, 18, 0, tzinfo=TZ),
+        level=2,
+    )
+    freeze_now["now"] = datetime(2026, 5, 2, 22, 0, tzinfo=TZ)
+    await water_scheduler.kickoff(app)
+    assert app.bot.sent == []
+    assert app.job_queue.scheduled == []

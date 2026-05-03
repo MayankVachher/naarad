@@ -1,0 +1,15 @@
+# Naarad cron entries.
+# Add via `crontab -e` and paste these lines. Adjust paths if you didn't clone to /home/pi/naarad.
+#
+# Times are in the system's local timezone — make sure the Pi is set to America/Toronto
+# (or whatever you put in config.json) with `sudo timedatectl set-timezone America/Toronto`.
+# Otherwise, cron will fire at the wrong wall-clock time.
+
+# Morning brief — every day at 06:00 (silent; user wakes ~08:30 and taps Start)
+0 6 * * * cd /home/pi/naarad && /home/pi/.local/bin/uv run python -m naarad.jobs.daily_brief >> /home/pi/naarad/logs/daily_brief.log 2>&1
+
+# Market open — weekdays at 09:35
+35 9 * * 1-5 cd /home/pi/naarad && /home/pi/.local/bin/uv run python -m naarad.jobs.market_open >> /home/pi/naarad/logs/market_open.log 2>&1
+
+# Market close — weekdays at 16:05
+5 16 * * 1-5 cd /home/pi/naarad && /home/pi/.local/bin/uv run python -m naarad.jobs.market_close >> /home/pi/naarad/logs/market_close.log 2>&1

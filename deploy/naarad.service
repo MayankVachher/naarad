@@ -1,0 +1,33 @@
+[Unit]
+Description=Naarad Telegram bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Adjust user, group, and WorkingDirectory to match your Pi setup.
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/naarad
+# uv must be on PATH; if installed under ~/.local/bin, this works:
+Environment=PATH=/home/pi/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/pi/.local/bin/uv run python -m naarad.bot
+Restart=on-failure
+RestartSec=5s
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/pi/naarad
+ProtectKernelTunables=true
+ProtectControlGroups=true
+
+# Log to journald
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=naarad
+
+[Install]
+WantedBy=multi-user.target

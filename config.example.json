@@ -1,0 +1,32 @@
+{
+  "telegram": {
+    "token": "PUT_BOTFATHER_TOKEN_HERE",
+    "chat_id": 0
+  },
+  "eodhd": {
+    "api_key": "PUT_EODHD_API_KEY_HERE"
+  },
+  "anthropic": {
+    "api_key": "PUT_ANTHROPIC_API_KEY_HERE"
+  },
+  "timezone": "America/Toronto",
+  "water": {
+    "active_end": "21:00",
+    "intervals_minutes": [120, 60, 30, 15, 5]
+  },
+  "brief": {
+    "location_name": "Toronto",
+    "location_lat": 43.6532,
+    "location_lon": -79.3832
+  },
+  "morning": {
+    "start_time": "06:00",
+    "fallback_time": "11:00"
+  },
+  "tickers_default": ["SPY", "QQQ", "AAPL"],
+  "schedules": {
+    "market_open": "09:35",
+    "market_close": "16:05"
+  },
+  "db_path": "state.db"
+}
