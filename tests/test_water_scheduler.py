@@ -25,6 +25,7 @@ from naarad.config import (
     TelegramConfig,
     WaterConfig as ConfigWater,
 )
+from naarad.water import copilot as water_copilot
 from naarad.water import scheduler as water_scheduler
 from naarad.water.scheduler import water_config_from
 
@@ -82,6 +83,18 @@ class FakeApp:
             "water_cfg": water_config_from(config),
             "water_lock": asyncio.Lock(),
         }
+
+
+@pytest.fixture(autouse=True)
+def stub_copilot_reminder(monkeypatch):
+    """Force the copilot reminder generator to fall back to the hardcoded line.
+
+    Otherwise these tests would invoke the real `copilot` CLI on every
+    `_send_reminder` call (slow + brittle).
+    """
+    async def _empty(level, timeout=45):
+        return ""
+    monkeypatch.setattr(water_copilot, "generate_reminder_line", _empty)
 
 
 @pytest.fixture

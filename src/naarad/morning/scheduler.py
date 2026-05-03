@@ -1,14 +1,18 @@
-"""Morning fallback scheduler.
+"""Morning fallback + daily brief schedulers.
 
-Daily job at config.morning.fallback_time: if the user hasn't tapped
-[☀️ Start day] yet, send a gentle "starting anyway" message, strip the
-button from the brief message, and kick off water tracking.
+In-process schedulers running inside the bot:
+- Daily brief at config.morning.start_time (06:00) — replaces the cron entry
+  for local dev. Production deployments can still use cron via deploy/crontab.txt.
+- Daily fallback at config.morning.fallback_time (11:00): if the user hasn't
+  tapped [☀️ Start day] yet, send a gentle "starting anyway" message, strip
+  the button, and kick off water tracking.
 
-On bot startup, also runs catch-up: if we're past today's fallback time and
-the day isn't started, run the fallback once after a short delay.
+On bot startup, also runs morning-fallback catch-up if we're past today's
+fallback time and the day isn't started.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta
 
@@ -20,10 +24,23 @@ from naarad.water import scheduler as water_scheduler
 
 log = logging.getLogger(__name__)
 
+BRIEF_JOB_NAME = "daily-brief"
 FALLBACK_JOB_NAME = "morning-fallback"
 FALLBACK_CATCHUP_NAME = "morning-fallback-catchup"
 
 FALLBACK_MESSAGE = "👋 Quiet morning — starting water tracking anyway."
+
+
+async def _brief_callback(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Run the daily brief in a worker thread (subprocess + httpx are blocking)."""
+    # Imported lazily so test harnesses don't pull telegram_api in unrelated tests.
+    from naarad.jobs.daily_brief import run_brief
+    log.info("daily brief job firing")
+    try:
+        rc = await asyncio.to_thread(run_brief)
+        log.info("daily brief job done (rc=%d)", rc)
+    except Exception:
+        log.exception("daily brief job crashed")
 
 
 async def _fallback_callback(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -60,26 +77,31 @@ async def _fallback_callback(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def kickoff(app: Application) -> None:
-    """Schedule the daily fallback, plus a catch-up if we're past it today."""
+    """Schedule the daily brief + fallback jobs (replacing any priors)."""
     config: Config = app.bot_data["config"]
     jq = app.job_queue
     if jq is None:
         log.error("JobQueue not available; install python-telegram-bot[job-queue]")
         return
 
-    fallback_t = config.morning.fallback_time_t
-    fallback_t_aware = fallback_t.replace(tzinfo=config.tz)
+    # Daily brief at config.morning.start_time.
+    brief_t = config.morning.start_time_t.replace(tzinfo=config.tz)
+    for job in jq.get_jobs_by_name(BRIEF_JOB_NAME):
+        job.schedule_removal()
+    jq.run_daily(_brief_callback, time=brief_t, name=BRIEF_JOB_NAME)
+    log.info("scheduled daily brief at %s", brief_t.isoformat())
 
-    # Replace any prior fallback job (idempotent on restart).
+    # Daily morning fallback at config.morning.fallback_time.
+    fallback_t = config.morning.fallback_time_t.replace(tzinfo=config.tz)
     for job in jq.get_jobs_by_name(FALLBACK_JOB_NAME):
         job.schedule_removal()
-    jq.run_daily(_fallback_callback, time=fallback_t_aware, name=FALLBACK_JOB_NAME)
-    log.info("scheduled daily morning fallback at %s", fallback_t_aware.isoformat())
+    jq.run_daily(_fallback_callback, time=fallback_t, name=FALLBACK_JOB_NAME)
+    log.info("scheduled daily morning fallback at %s", fallback_t.isoformat())
 
     # Catch-up: bot started after fallback time, day not yet started.
     now = datetime.now(config.tz)
     today = now.date()
-    today_fallback = datetime.combine(today, fallback_t, tzinfo=config.tz)
+    today_fallback = datetime.combine(today, config.morning.fallback_time_t, tzinfo=config.tz)
     if now >= today_fallback and not db.is_day_started(config.db_path, today):
         log.info("running morning fallback catch-up (now %s past %s)", now, today_fallback)
         for job in jq.get_jobs_by_name(FALLBACK_CATCHUP_NAME):

@@ -1,9 +1,12 @@
-"""Daily brief cron job — runs every morning at config.morning.start_time.
+"""Daily brief cron / scheduler entry point.
 
 Fetches sources, asks Copilot to render the brief, posts it silently to
 Telegram with a [☀️ Start day] button, and persists the message_id so the
 bot can edit it later (when the user taps Start, or when the 11 AM fallback
 runs).
+
+`run_brief()` is the reusable entry point — call it from the cron job
+(`main`) or from the bot's in-process scheduler (`morning.scheduler`).
 """
 from __future__ import annotations
 
@@ -28,8 +31,8 @@ def _start_day_keyboard() -> dict:
     }
 
 
-def main() -> int:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
+def run_brief() -> int:
+    """Build, send, and persist today's brief. Safe to call from any process."""
     config = load_config()
     today = datetime.now(config.tz).date()
 
@@ -54,6 +57,11 @@ def main() -> int:
         except Exception:
             log.exception("failed to persist start_button_message_id")
     return 0
+
+
+def main() -> int:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
+    return run_brief()
 
 
 if __name__ == "__main__":

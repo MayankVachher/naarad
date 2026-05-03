@@ -33,7 +33,10 @@ async def start_day_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if await reject_unauthorized(update, context):
         return
 
-    await query.answer("☀️ Starting your day…")
+    try:
+        await query.answer()
+    except Exception:
+        log.debug("query.answer failed (likely stale tap)", exc_info=True)
     config: Config = context.application.bot_data["config"]
     today = datetime.now(config.tz).date()
 
