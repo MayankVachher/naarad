@@ -23,6 +23,7 @@ from naarad.handlers import status as status_handlers
 from naarad.handlers import tickers as ticker_handlers
 from naarad.handlers import water as water_handlers
 from naarad.morning import scheduler as morning_scheduler
+from naarad.startup import validate_startup
 from naarad.water import scheduler as water_scheduler
 from naarad.water.scheduler import CONFIRM_CALLBACK
 
@@ -30,6 +31,7 @@ log = logging.getLogger(__name__)
 
 
 def build_application(config: Config) -> Application:
+    validate_startup(config)
     db.init_db(config.db_path, seed_tickers=config.tickers_default)
 
     app = ApplicationBuilder().token(config.telegram.token).build()
