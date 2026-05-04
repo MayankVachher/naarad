@@ -12,11 +12,11 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import subprocess
 from datetime import date, datetime
 
-from naarad import db
 from naarad.brief import sources
 from naarad.config import Config
 
@@ -201,8 +201,6 @@ def get_daily_brief(today: date, config: Config, timeout: int = DEFAULT_TIMEOUT)
 
 # --- Sanitization ---------------------------------------------------------
 
-import re as _re
-
 _ALLOWED_TAGS = ("b", "/b", "i", "/i", "u", "/u", "s", "/s",
                  "code", "/code", "pre", "/pre", "a", "/a")
 
@@ -215,18 +213,18 @@ def _sanitize_html(text: str) -> str:
     - Strip Markdown bold (**foo**) and italic (*foo*) — replace with <b>/<i>.
     """
     # 1) Markdown -> HTML.  ** before * so we don't eat the bold ones.
-    text = _re.sub(r"\*\*([^*\n]+)\*\*", r"<b>\1</b>", text)
-    text = _re.sub(r"(?<!\*)\*([^*\n]+)\*(?!\*)", r"<i>\1</i>", text)
+    text = re.sub(r"\*\*([^*\n]+)\*\*", r"<b>\1</b>", text)
+    text = re.sub(r"(?<!\*)\*([^*\n]+)\*(?!\*)", r"<i>\1</i>", text)
 
     # 2) Escape any remaining '&' that isn't already an entity.
-    text = _re.sub(r"&(?!(?:amp|lt|gt|quot|apos|#\d+);)", "&amp;", text)
+    text = re.sub(r"&(?!(?:amp|lt|gt|quot|apos|#\d+);)", "&amp;", text)
 
     # 3) Escape '<' / '>' that aren't around a whitelisted tag.
-    def _esc_tag(m: "_re.Match[str]") -> str:
+    def _esc_tag(m: "re.Match[str]") -> str:
         tag = m.group(1).strip().lower().split()[0] if m.group(1).strip() else ""
         if tag in _ALLOWED_TAGS:
             return m.group(0)
         return m.group(0).replace("<", "&lt;").replace(">", "&gt;")
 
-    text = _re.sub(r"<([^<>]*)>", _esc_tag, text)
+    text = re.sub(r"<([^<>]*)>", _esc_tag, text)
     return text
