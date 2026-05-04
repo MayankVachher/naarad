@@ -11,10 +11,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
-import shutil
-import subprocess
-from datetime import datetime
+
+from naarad.copilot_runner import run_copilot
 
 log = logging.getLogger(__name__)
 
@@ -40,62 +38,13 @@ Hard rules:
 """
 
 
-def _copilot_bin() -> str:
-    explicit = os.environ.get("COPILOT_BIN")
-    if explicit:
-        return explicit
-    found = shutil.which("copilot")
-    if found:
-        return found
-    return "copilot"
-
-
 def _run_copilot_sync(prompt: str, timeout: int) -> str:
-    """Synchronous subprocess call. Returns the trimmed first line, or "" on failure."""
-    cmd = [
-        _copilot_bin(),
-        "-p", prompt,
-        "--no-color",
-        "--log-level", "none",
-        "--deny-tool=shell",
-        "--deny-tool=write",
-        "--disable-builtin-mcps",
-        "--no-ask-user",
-        "--no-auto-update",
-    ]
-    started = datetime.now()
-    try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=timeout,
-            check=False,
-        )
-    except FileNotFoundError:
-        log.warning("copilot CLI not found; falling back to hardcoded reminder")
-        return ""
-    except subprocess.TimeoutExpired:
-        log.warning("copilot reminder timed out after %ds; falling back", timeout)
-        return ""
-    except Exception:
-        log.exception("copilot reminder subprocess crashed; falling back")
-        return ""
-
-    elapsed = (datetime.now() - started).total_seconds()
-    log.info(
-        "copilot reminder exit=%d in %.1fs (stdout=%dB)",
-        result.returncode, elapsed, len(result.stdout or ""),
-    )
-    if result.returncode != 0:
-        return ""
-    body = (result.stdout or "").strip()
-    if not body:
+    """Synchronous call. Returns the trimmed first non-empty line, or "" on failure."""
+    result = run_copilot(prompt, timeout=timeout, log_label="water-reminder")
+    if not result.ok:
         return ""
     # Take the first non-empty line — guard against multi-line drift.
-    for line in body.splitlines():
+    for line in result.stdout.splitlines():
         line = line.strip()
         if line:
             return line

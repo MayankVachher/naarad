@@ -11,14 +11,12 @@ morning brief is never silently missing.
 from __future__ import annotations
 
 import logging
-import os
 import re
-import shutil
-import subprocess
-from datetime import date, datetime
+from datetime import date
 
 from naarad.brief import sources
 from naarad.config import Config
+from naarad.copilot_runner import run_copilot
 
 log = logging.getLogger(__name__)
 
@@ -121,19 +119,19 @@ def _build_prompt(today: date, config: Config) -> str:
 
 
 def _copilot_bin() -> str:
-    """Resolve the copilot binary. COPILOT_BIN env var wins; otherwise PATH lookup."""
-    explicit = os.environ.get("COPILOT_BIN")
-    if explicit:
-        return explicit
-    found = shutil.which("copilot")
-    if found:
-        return found
-    return "copilot"  # let subprocess fail with a clear message
+    """Resolve the copilot binary. COPILOT_BIN env var wins; otherwise PATH lookup.
+
+    Kept as a thin wrapper for backwards compatibility with anything that
+    imports it from this module; new code should call
+    `naarad.copilot_runner.copilot_bin` directly.
+    """
+    from naarad.copilot_runner import copilot_bin
+    return copilot_bin()
 
 
 def _fallback_brief(today: date, reason: str) -> str:
     return (
-        f"<b>☀️ {today.strftime('%a %b %-d, %Y') if hasattr(today, 'strftime') else today}</b>\n"
+        f"<b>☀️ {today.strftime('%a %b ')}{today.day}{today.strftime(', %Y')}</b>\n"
         "\n"
         "(Copilot brief unavailable today — falling back to a placeholder.)\n"
         f"<i>{reason}</i>"
@@ -147,52 +145,11 @@ def get_daily_brief(today: date, config: Config, timeout: int = DEFAULT_TIMEOUT)
     On failure, returns a fallback string — never raises.
     """
     prompt = _build_prompt(today, config)
-    cmd = [
-        _copilot_bin(),
-        "-p", prompt,
-        "--no-color",
-        "--log-level", "none",
-        "--deny-tool=shell",
-        "--deny-tool=write",
-        "--disable-builtin-mcps",
-        "--no-ask-user",
-        "--no-auto-update",
-    ]
+    result = run_copilot(prompt, timeout=timeout, log_label="daily-brief")
+    if not result.ok:
+        return _fallback_brief(today, result.error_reason)
 
-    log.info("invoking copilot for daily brief (timeout=%ds)", timeout)
-    started = datetime.now()
-    try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=timeout,
-            check=False,
-        )
-    except FileNotFoundError:
-        return _fallback_brief(today, "copilot CLI not found on PATH")
-    except subprocess.TimeoutExpired:
-        return _fallback_brief(today, f"copilot timed out after {timeout}s")
-    except Exception as exc:  # noqa: BLE001
-        log.exception("copilot invocation crashed")
-        return _fallback_brief(today, f"{type(exc).__name__}: {exc}")
-
-    elapsed = (datetime.now() - started).total_seconds()
-    stdout = result.stdout or ""
-    stderr = result.stderr or ""
-    log.info("copilot exit=%d in %.1fs (stdout=%dB)", result.returncode, elapsed, len(stdout))
-
-    if result.returncode != 0:
-        snippet = stderr.strip().splitlines()[-3:]
-        return _fallback_brief(today, f"copilot exit {result.returncode}: {' / '.join(snippet)}")
-
-    body = stdout.strip()
-    if not body:
-        return _fallback_brief(today, "copilot returned empty output")
-
-    body = _sanitize_html(body)
+    body = _sanitize_html(result.stdout)
 
     # Header line at top — date in the user's preferred format ("Fri May 1, 2026").
     header = today.strftime("%a %b ") + str(today.day) + today.strftime(", %Y")
