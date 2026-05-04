@@ -3,9 +3,11 @@
 Philosophy:
 - Things that make the bot useless = FATAL (token shape, chat_id, DB path).
   Better to crash at boot than to silently fail at the next reminder.
-- Things that have a graceful fallback = WARN (copilot binary).
+- Things that have a graceful fallback = WARN (copilot binary, EODHD key).
   The brief and water reminders fall back to placeholders / hardcoded
   lines, so a missing copilot CLI degrades the bot but doesn't break it.
+  Tickers are independent of the rest — a missing EODHD key disables them
+  via `is_tickers_enabled` and the bot still serves /water, /brief, etc.
 
 Called from `bot.build_application()` before any handlers are registered.
 """
@@ -100,18 +102,23 @@ def _check_copilot_available() -> None:
     log.info("copilot CLI ok: %s", (result.stdout or "").strip().splitlines()[0])
 
 
-def _validate_eodhd_for_tickers(config: Config) -> None:
-    """If tickers are enabled at the config floor, require a non-empty EODHD
-    API key. Without it, the scheduled jobs would 401 silently every tick.
+def _check_eodhd_for_tickers(config: Config) -> None:
+    """Best-effort. Logs WARN if tickers are enabled but the key is empty.
+
+    `is_tickers_enabled` already treats an empty key as 'tickers off', so
+    the daily jobs and /quote silently skip — no spammy 'data unavailable'
+    posts. The user fixes by adding a real key and restarting; /status
+    will report the off-reason in the meantime.
     """
     if not config.tickers.enabled:
         return
-    key = (config.eodhd.api_key or "").strip()
-    if not key:
-        raise StartupValidationError(
-            "config.tickers.enabled=true but config.eodhd.api_key is empty. "
-            "Either set tickers.enabled=false or fill in a real EODHD key."
-        )
+    if (config.eodhd.api_key or "").strip():
+        return
+    log.warning(
+        "config.tickers.enabled=true but config.eodhd.api_key is empty — "
+        "tickers will stay off until a real EODHD key is added. The rest "
+        "of the bot is unaffected."
+    )
 
 
 def validate_startup(config: Config) -> None:
@@ -119,6 +126,6 @@ def validate_startup(config: Config) -> None:
     _validate_token(config.telegram.token)
     _validate_chat_id(config.telegram.chat_id)
     _validate_db_writable(config.db_path)
-    _validate_eodhd_for_tickers(config)
+    _check_eodhd_for_tickers(config)
     _check_copilot_available()
     log.info("startup validation passed")

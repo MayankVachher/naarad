@@ -23,7 +23,7 @@ from telegram.ext import ContextTypes
 from naarad.config import Config
 from naarad.handlers.auth import reject_unauthorized
 from naarad.jobs._common import header_with_date, render_open_block
-from naarad.runtime import is_tickers_enabled
+from naarad.runtime import is_tickers_enabled, tickers_off_reason
 from naarad.tickers.eodhd import EODHDClient, _classify_symbol
 
 log = logging.getLogger(__name__)
@@ -32,10 +32,16 @@ USAGE = "Usage: /quote SYMBOL  (e.g. /quote GOOGL or /quote VFV.TO)"
 
 
 def _refusal(config: Config) -> str:
-    if not config.tickers.enabled:
+    reason = tickers_off_reason(config, config.db_path)
+    if reason == "config":
         return (
             "Tickers are disabled at the config level "
             "(config.tickers.enabled=false). Edit config.json + restart."
+        )
+    if reason == "no_key":
+        return (
+            "Tickers are off — no EODHD API key configured. "
+            "Add config.eodhd.api_key and restart."
         )
     return (
         "Tickers are off at runtime. Use <code>/ticker on</code> to re-enable."

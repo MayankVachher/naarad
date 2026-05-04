@@ -101,20 +101,34 @@ def test_copilot_check_logs_warning_on_missing_binary(tmp_path, monkeypatch, cap
     assert "copilot CLI not found" in caplog.text
 
 
-def test_rejects_empty_eodhd_key_when_tickers_enabled(tmp_path, stub_copilot):
+def test_warns_on_empty_eodhd_key_when_tickers_enabled(tmp_path, stub_copilot, caplog):
     cfg = make_config(tmp_path, eodhd_key="", tickers_enabled=True)
-    with pytest.raises(StartupValidationError, match="eodhd.api_key"):
-        validate_startup(cfg)
+    with caplog.at_level(logging.WARNING):
+        validate_startup(cfg)  # must NOT raise — bot should still boot
+    assert any(
+        "eodhd.api_key" in r.message and r.levelname == "WARNING"
+        for r in caplog.records
+    )
 
 
-def test_rejects_whitespace_only_eodhd_key_when_tickers_enabled(tmp_path, stub_copilot):
+def test_warns_on_whitespace_only_eodhd_key_when_tickers_enabled(
+    tmp_path, stub_copilot, caplog
+):
     cfg = make_config(tmp_path, eodhd_key="   ", tickers_enabled=True)
-    with pytest.raises(StartupValidationError, match="eodhd.api_key"):
-        validate_startup(cfg)
+    with caplog.at_level(logging.WARNING):
+        validate_startup(cfg)  # must NOT raise
+    assert any(
+        "eodhd.api_key" in r.message and r.levelname == "WARNING"
+        for r in caplog.records
+    )
 
 
-def test_skips_eodhd_check_when_tickers_disabled(tmp_path, stub_copilot):
+def test_skips_eodhd_check_when_tickers_disabled(tmp_path, stub_copilot, caplog):
     # If the user explicitly turned tickers off at the config floor, an empty
-    # EODHD key is fine — the feature is dormant anyway.
+    # EODHD key is fine — the feature is dormant anyway, no warning needed.
     cfg = make_config(tmp_path, eodhd_key="", tickers_enabled=False)
-    validate_startup(cfg)  # must not raise
+    with caplog.at_level(logging.WARNING):
+        validate_startup(cfg)  # must not raise
+    assert not any(
+        "eodhd.api_key" in r.message for r in caplog.records
+    )

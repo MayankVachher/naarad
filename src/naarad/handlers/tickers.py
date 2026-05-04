@@ -12,7 +12,10 @@ from telegram.ext import ContextTypes
 from naarad import db
 from naarad.config import Config
 from naarad.handlers.auth import reject_unauthorized
-from naarad.runtime import is_tickers_enabled, set_tickers_runtime
+from naarad.runtime import (
+    set_tickers_runtime,
+    tickers_off_reason,
+)
 from naarad.tickers.eodhd import _classify_symbol
 
 USAGE = (
@@ -25,18 +28,23 @@ USAGE = (
 
 
 def _format_state(config: Config) -> str:
-    if not config.tickers.enabled:
+    reason = tickers_off_reason(config, config.db_path)
+    if reason == "config":
         return (
             "Tickers: <b>off</b> (disabled in config — runtime toggle inert).\n"
             "Set config.tickers.enabled=true and restart to re-enable."
         )
-    enabled = is_tickers_enabled(config, config.db_path)
-    if enabled:
-        return "Tickers: <b>on</b>. Use <code>/ticker off</code> to disable at runtime."
-    return (
-        "Tickers: <b>off</b> (runtime). Use <code>/ticker on</code> to re-enable.\n"
-        "Market open / close briefs and /quote are paused while off."
-    )
+    if reason == "no_key":
+        return (
+            "Tickers: <b>off</b> (no EODHD API key — runtime toggle inert).\n"
+            "Add a real config.eodhd.api_key and restart to enable."
+        )
+    if reason == "runtime":
+        return (
+            "Tickers: <b>off</b> (runtime). Use <code>/ticker on</code> to re-enable.\n"
+            "Market open / close briefs and /quote are paused while off."
+        )
+    return "Tickers: <b>on</b>. Use <code>/ticker off</code> to disable at runtime."
 
 
 async def ticker_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -63,11 +71,15 @@ async def ticker_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     if sub in ("on", "off"):
-        if not config.tickers.enabled:
+        reason = tickers_off_reason(config, config.db_path)
+        # 'config' and 'no_key' are inert — flipping the runtime flag won't
+        # bring tickers back, so refuse loudly with the same message _format_state
+        # would render. 'runtime' is the only state where the toggle actually
+        # does anything.
+        if reason in ("config", "no_key"):
             await msg.reply_text(
-                "Can't toggle: tickers are disabled at the config level "
-                "(config.tickers.enabled=false).\n"
-                "Edit config.json + restart to re-enable.",
+                "Can't toggle: " + _format_state(config),
+                parse_mode="HTML",
             )
             return
         set_tickers_runtime(config.db_path, enabled=(sub == "on"))

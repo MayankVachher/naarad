@@ -25,6 +25,7 @@ from naarad.runtime import (
     is_tickers_enabled,
     set_llm_runtime,
     set_tickers_runtime,
+    tickers_off_reason,
 )
 
 
@@ -33,10 +34,11 @@ def make_config(
     *,
     llm_enabled: bool = True,
     tickers_enabled: bool = True,
+    eodhd_key: str = "x",
 ) -> Config:
     return Config(
         telegram=TelegramConfig(token="123:ABCDEFGHIJKLMNOPQRSTUVWXYZ", chat_id=42),
-        eodhd=EodhdConfig(api_key="x"),
+        eodhd=EodhdConfig(api_key=eodhd_key),
         timezone="America/Toronto",
         water=WaterConfig(),
         brief=BriefConfig(),
@@ -176,3 +178,62 @@ def test_tickers_and_llm_flags_are_independent(tmp_path: Path) -> None:
     set_tickers_runtime(config.db_path, enabled=True)
     assert is_llm_enabled(config) is False
     assert is_tickers_enabled(config) is True
+
+
+# ---- no-EODHD-key gate (graceful degradation) -------------------------------
+
+def test_tickers_off_when_eodhd_key_empty(tmp_path: Path) -> None:
+    config = make_config(tmp_path, eodhd_key="")
+    db.init_db(config.db_path)
+    assert is_tickers_enabled(config) is False
+
+
+def test_tickers_off_when_eodhd_key_whitespace(tmp_path: Path) -> None:
+    config = make_config(tmp_path, eodhd_key="   ")
+    db.init_db(config.db_path)
+    assert is_tickers_enabled(config) is False
+
+
+def test_tickers_off_when_key_empty_even_if_runtime_on(tmp_path: Path) -> None:
+    """Runtime flag can't override a missing key — the API call would 401."""
+    config = make_config(tmp_path, eodhd_key="")
+    db.init_db(config.db_path)
+    set_tickers_runtime(config.db_path, enabled=True)
+    assert is_tickers_enabled(config) is False
+
+
+# ---- tickers_off_reason truth table -----------------------------------------
+
+def test_off_reason_none_when_all_three_layers_on(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    assert tickers_off_reason(config) is None
+
+
+def test_off_reason_config_takes_precedence(tmp_path: Path) -> None:
+    """Config floor wins over missing key + runtime off — fix the deepest issue first."""
+    config = make_config(tmp_path, tickers_enabled=False, eodhd_key="")
+    db.init_db(config.db_path)
+    set_tickers_runtime(config.db_path, enabled=False)
+    assert tickers_off_reason(config) == "config"
+
+
+def test_off_reason_no_key_when_only_key_missing(tmp_path: Path) -> None:
+    config = make_config(tmp_path, eodhd_key="")
+    db.init_db(config.db_path)
+    assert tickers_off_reason(config) == "no_key"
+
+
+def test_off_reason_no_key_takes_precedence_over_runtime(tmp_path: Path) -> None:
+    """Missing key is more permanent than a flipped runtime toggle."""
+    config = make_config(tmp_path, eodhd_key="")
+    db.init_db(config.db_path)
+    set_tickers_runtime(config.db_path, enabled=False)
+    assert tickers_off_reason(config) == "no_key"
+
+
+def test_off_reason_runtime_when_only_runtime_off(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    set_tickers_runtime(config.db_path, enabled=False)
+    assert tickers_off_reason(config) == "runtime"

@@ -9,7 +9,7 @@ from telegram.ext import ContextTypes
 from naarad import db
 from naarad.config import Config
 from naarad.handlers.auth import reject_unauthorized
-from naarad.runtime import is_llm_enabled, is_tickers_enabled
+from naarad.runtime import is_llm_enabled, tickers_off_reason
 from naarad.water.scheduler import water_config_from
 from naarad.water.state import Idle, Reminder, Sleep, WaterState, next_action
 
@@ -83,12 +83,13 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     next_str = _describe_next_action(next_action(state, now, water_config_from(config)))
 
     llm_state = "on" if is_llm_enabled(config, config.db_path) else "off"
-    if not config.tickers.enabled:
-        tickers_state = "off (config)"
-    elif is_tickers_enabled(config, config.db_path):
-        tickers_state = "on"
-    else:
-        tickers_state = "off (runtime)"
+    reason = tickers_off_reason(config, config.db_path)
+    tickers_state = {
+        None: "on",
+        "config": "off (config)",
+        "no_key": "off (no EODHD key)",
+        "runtime": "off (runtime)",
+    }[reason]
 
     await update.message.reply_text(
         f"<b>Naarad status</b>\n"

@@ -26,10 +26,10 @@ from naarad.runtime import TICKERS_FLAG_KEY
 from naarad.tickers.eodhd import Quote
 
 
-def make_config(tmp_path: Path, *, tickers_enabled: bool = True) -> Config:
+def make_config(tmp_path: Path, *, tickers_enabled: bool = True, eodhd_key: str = "x") -> Config:
     return Config(
         telegram=TelegramConfig(token="123:ABCDEFGHIJKLMNOPQRSTUVWXYZ", chat_id=42),
-        eodhd=EodhdConfig(api_key="x"),
+        eodhd=EodhdConfig(api_key=eodhd_key),
         timezone="America/Toronto",
         water=WaterConfig(),
         brief=BriefConfig(),
@@ -128,6 +128,18 @@ async def test_refuses_when_config_floor_off(tmp_path: Path) -> None:
 
     text = _last_reply(update)
     assert "config" in text.lower()
+
+
+@pytest.mark.asyncio
+async def test_refuses_when_eodhd_key_missing(tmp_path: Path) -> None:
+    config = make_config(tmp_path, eodhd_key="")
+    db.init_db(config.db_path)
+    update = make_update()
+
+    await quote_command(update, make_context(config, args=["GOOGL"]))
+
+    text = _last_reply(update)
+    assert "EODHD" in text or "key" in text.lower()
 
 
 @pytest.mark.asyncio
