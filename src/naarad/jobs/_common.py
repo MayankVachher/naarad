@@ -1,41 +1,67 @@
-"""Shared helpers for market_open and market_close cron jobs.
+"""Shared helpers for market_open and market_close in-process jobs.
 
-DEPRECATED alongside jobs/market_open.py and jobs/market_close.py. Pending
-replacement by yfinance-backed helpers (Phase 10).
+The formatters (`fmt_price`, `fmt_pct`, `fmt_volume`) and the parallel
+quote-fetch helper (`fetch_quotes_concurrent`) are reused across both
+schedules. Per-exchange holiday logic and the final message format
+live in the scheduler/job callbacks themselves so this module stays
+free of bot-context coupling.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
-from datetime import date
 
-from naarad.config import Config
 from naarad.tickers.eodhd import EODHDClient, Quote
 
 log = logging.getLogger(__name__)
 
 
+def _empty_quote(symbol: str) -> Quote:
+    return Quote(
+        symbol=symbol,
+        timestamp=None,
+        open=None,
+        high=None,
+        low=None,
+        close=None,
+        previous_close=None,
+        change=None,
+        change_pct=None,
+        volume=None,
+    )
+
+
 def fetch_quotes(client: EODHDClient, symbols: list[str]) -> list[Quote]:
+    """Synchronous serial fetch. Used by tests and any callers outside the bot
+    event loop. On any per-symbol failure, returns an empty Quote.
+    """
     quotes: list[Quote] = []
     for sym in symbols:
         try:
             quotes.append(client.real_time_quote(sym))
         except Exception:
             log.exception("failed to fetch %s", sym)
-            quotes.append(
-                Quote(
-                    symbol=sym,
-                    timestamp=None,
-                    open=None,
-                    high=None,
-                    low=None,
-                    close=None,
-                    previous_close=None,
-                    change=None,
-                    change_pct=None,
-                    volume=None,
-                )
-            )
+            quotes.append(_empty_quote(sym))
     return quotes
+
+
+async def fetch_quotes_concurrent(
+    client: EODHDClient, symbols: list[str]
+) -> list[Quote]:
+    """Async parallel fetch via asyncio.to_thread.
+
+    EODHDClient.real_time_quote is sync (httpx blocking), so each call is
+    offloaded to a worker thread. Watchlists are small (4-10 tickers) so
+    we don't bother with a semaphore.
+    """
+    async def _one(sym: str) -> Quote:
+        try:
+            return await asyncio.to_thread(client.real_time_quote, sym)
+        except Exception:
+            log.exception("failed to fetch %s", sym)
+            return _empty_quote(sym)
+
+    return await asyncio.gather(*(_one(s) for s in symbols))
 
 
 def fmt_price(v: float | None) -> str:
@@ -61,18 +87,5 @@ def fmt_volume(v: int | None) -> str:
     return str(v)
 
 
-def holiday_message(name: str | None, today: date) -> str:
-    label = name or "Market holiday"
-    return f"📅 <b>Market closed today</b> — {label} ({today.isoformat()})"
-
-
 def unavailable_message(prefix: str, error: str) -> str:
     return f"⚠️ <b>{prefix}</b>: market data unavailable ({error})"
-
-
-def check_holiday_or_proceed(client: EODHDClient, config: Config, today: date) -> str | None:
-    """Returns a holiday-message string if today is a holiday, else None."""
-    is_hol, name = client.is_us_market_holiday(today)
-    if is_hol:
-        return holiday_message(name, today)
-    return None

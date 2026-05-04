@@ -1,31 +1,29 @@
-"""Market-open cron job: posts open price + previous close + % change for all tickers.
+"""In-process market-open job.
 
-DEPRECATED: cron entry is disabled in deploy/crontab.txt and the in-process
-scheduler does not invoke this. Pending replacement by a yfinance-backed
-job (Phase 10).
+Fires daily at config.schedules.market_open in config.tickers.market_timezone
+(default 09:35 America/New_York). Skipped on weekends, when the runtime kill
+switch is off, or when the watchlist is empty. Holiday/EarlyClose handling
+is layered in by jobs.scheduler in a follow-up.
 """
 from __future__ import annotations
 
 import logging
-import sys
 from datetime import datetime
 
+from telegram.ext import Application, ContextTypes
+
 from naarad import db
-from naarad.config import load_config
-from naarad.jobs._common import (
-    check_holiday_or_proceed,
-    fetch_quotes,
-    fmt_pct,
-    fmt_price,
-    unavailable_message,
-)
-from naarad.telegram_api import send_message
-from naarad.tickers.eodhd import EODHDClient
+from naarad.config import Config
+from naarad.jobs._common import fetch_quotes_concurrent, fmt_pct, fmt_price
+from naarad.runtime import is_tickers_enabled
+from naarad.tickers.eodhd import EODHDClient, Quote
 
 log = logging.getLogger(__name__)
 
+JOB_NAME = "market-open"
 
-def _format_open(quotes) -> str:
+
+def _format_open(quotes: list[Quote]) -> str:
     lines = ["📈 <b>Market open</b>"]
     for q in quotes:
         if q.is_empty:
@@ -40,41 +38,48 @@ def _format_open(quotes) -> str:
     return "\n".join(lines)
 
 
-def main() -> int:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
-    config = load_config()
-    db.init_db(config.db_path, seed_tickers=config.tickers_default)
-    today = datetime.now(config.tz).date()
-    client = EODHDClient(config.eodhd.api_key)
+async def run(app: Application) -> None:
+    """Single market-open run. Safe to invoke directly (tests, manual trigger)."""
+    config: Config = app.bot_data["config"]
 
-    holiday_msg = check_holiday_or_proceed(client, config, today)
-    if holiday_msg:
-        send_message(config.telegram.token, config.telegram.chat_id, holiday_msg)
-        return 0
+    now_market = datetime.now(config.tickers.market_tz)
+    if now_market.weekday() >= 5:
+        log.info("market_open: weekend, skipping")
+        return
+
+    if not is_tickers_enabled(config):
+        log.info("market_open: disabled, skipping")
+        return
 
     symbols = db.list_tickers(config.db_path)
     if not symbols:
-        send_message(
-            config.telegram.token,
-            config.telegram.chat_id,
-            "📈 <b>Market open</b>\n  (no tickers tracked — try /ticker add SYMBOL)",
-        )
-        return 0
+        log.info("market_open: empty watchlist, skipping")
+        return
 
+    client: EODHDClient = app.bot_data["eodhd_client"]
     try:
-        quotes = fetch_quotes(client, symbols)
-        body = _format_open(quotes)
-    except Exception as exc:
-        log.exception("market open failed")
-        body = unavailable_message("Market open", type(exc).__name__)
-
-    try:
-        send_message(config.telegram.token, config.telegram.chat_id, body)
+        quotes = await fetch_quotes_concurrent(client, symbols)
     except Exception:
-        log.exception("market open send failed")
-        return 1
-    return 0
+        log.exception("market_open: fetch failed")
+        return
+
+    body = _format_open(quotes)
+    try:
+        await app.bot.send_message(
+            chat_id=config.telegram.chat_id,
+            text=body,
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+        )
+    except Exception:
+        log.exception("market_open: send failed")
 
 
-if __name__ == "__main__":
-    sys.exit(main())
+async def callback(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """JobQueue entry point — wraps run() with try/except so a single bad
+    day doesn't kill the scheduler.
+    """
+    try:
+        await run(context.application)
+    except Exception:
+        log.exception("market_open job crashed")

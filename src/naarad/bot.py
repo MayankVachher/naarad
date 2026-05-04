@@ -24,8 +24,10 @@ from naarad.handlers import morning as morning_handlers
 from naarad.handlers import status as status_handlers
 from naarad.handlers import tickers as ticker_handlers
 from naarad.handlers import water as water_handlers
+from naarad.jobs import scheduler as ticker_scheduler
 from naarad.morning import scheduler as morning_scheduler
 from naarad.startup import validate_startup
+from naarad.tickers.eodhd import EODHDClient
 from naarad.water import scheduler as water_scheduler
 from naarad.water.scheduler import CONFIRM_CALLBACK
 
@@ -50,6 +52,7 @@ def build_application(config: Config) -> Application:
     app.bot_data["config"] = config
     app.bot_data["water_cfg"] = water_scheduler.water_config_from(config)
     app.bot_data["water_lock"] = asyncio.Lock()
+    app.bot_data["eodhd_client"] = EODHDClient(config.eodhd.api_key)
 
     app.add_handler(CommandHandler("water", water_handlers.water_command))
     app.add_handler(CommandHandler("brief", brief_handlers.brief_command))
@@ -75,6 +78,7 @@ def build_application(config: Config) -> Application:
             log.exception("set_my_commands failed; / autocomplete may be stale")
         await water_scheduler.kickoff(app)
         await morning_scheduler.kickoff(app)
+        await ticker_scheduler.kickoff(app)
 
     app.post_init = _post_init  # type: ignore[assignment]
     return app
