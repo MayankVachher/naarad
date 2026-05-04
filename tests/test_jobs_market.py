@@ -24,7 +24,7 @@ from naarad.config import (
 from naarad.jobs import market_close, market_open
 from naarad.jobs import scheduler as ticker_scheduler
 from naarad.runtime import TICKERS_FLAG_KEY
-from naarad.tickers.eodhd import Quote
+from naarad.tickers.eodhd import ExchangeDay, ExchangeStatus, Quote
 
 # Frozen Tuesday to avoid weekend gate
 WEEKDAY = datetime(2025, 10, 14, 9, 35, tzinfo=ZoneInfo("America/New_York"))
@@ -226,6 +226,120 @@ async def test_market_open_renders_unavailable_for_failed_symbol(tmp_path: Path)
     assert "GOOGL" in text
     assert "NVDA" in text
     assert "data unavailable" in text
+
+
+# ---- per-exchange holiday + EarlyClose -------------------------------------
+
+@pytest.mark.asyncio
+async def test_market_open_us_closed_tsx_open(tmp_path: Path) -> None:
+    """US is fully closed (Christmas), TSX still trades. Quotes only for TSX,
+    plus a ``📅 US closed today`` line.
+    """
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    db.add_ticker(config.db_path, "GOOGL")  # US
+    db.add_ticker(config.db_path, "VFV.TO")  # TSX
+
+    client = MagicMock()
+    client.get_exchange_status.side_effect = lambda ex, on: {
+        "US": ExchangeDay(status=ExchangeStatus.CLOSED_HOLIDAY, name="Christmas Day"),
+        "TSX": ExchangeDay(status=ExchangeStatus.OPEN),
+    }[ex]
+    client.real_time_quote.return_value = make_quote("VFV.TO")
+
+    app = make_app(config, client=client)
+
+    with patch("naarad.jobs.market_open.datetime") as m_dt:
+        m_dt.now.return_value = WEEKDAY
+        await market_open.run(app)
+
+    text = app.bot.send_message.await_args.kwargs["text"]
+    assert "VFV.TO" in text
+    # GOOGL must NOT appear as a quote line — it's in the closed exchange.
+    assert "GOOGL" not in text
+    assert "US closed today" in text
+    assert "Christmas Day" in text
+    # And we never tried to fetch the GOOGL quote.
+    fetched = [c.args[0] for c in client.real_time_quote.call_args_list]
+    assert "GOOGL" not in fetched
+
+
+@pytest.mark.asyncio
+async def test_market_open_all_exchanges_closed(tmp_path: Path) -> None:
+    """Both US and TSX closed → single combined holiday message, no fetches."""
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    db.add_ticker(config.db_path, "GOOGL")
+    db.add_ticker(config.db_path, "VFV.TO")
+
+    client = MagicMock()
+    client.get_exchange_status.side_effect = lambda ex, on: ExchangeDay(
+        status=ExchangeStatus.CLOSED_HOLIDAY, name=f"{ex} holiday"
+    )
+
+    app = make_app(config, client=client)
+
+    with patch("naarad.jobs.market_open.datetime") as m_dt:
+        m_dt.now.return_value = WEEKDAY
+        await market_open.run(app)
+
+    app.bot.send_message.assert_awaited_once()
+    text = app.bot.send_message.await_args.kwargs["text"]
+    assert "Market open" in text
+    assert "US closed today" in text
+    assert "TSX closed today" in text
+    # No ticker symbol → no quote section.
+    assert "GOOGL" not in text
+    assert "VFV.TO" not in text
+    client.real_time_quote.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_market_close_early_close_adds_header(tmp_path: Path) -> None:
+    """EarlyClose still posts quotes but adds an ``⏰ on early close`` line."""
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    db.add_ticker(config.db_path, "GOOGL")
+
+    client = MagicMock()
+    client.get_exchange_status.return_value = ExchangeDay(
+        status=ExchangeStatus.EARLY_CLOSE, name="Christmas Eve"
+    )
+    client.real_time_quote.return_value = make_quote("GOOGL")
+
+    app = make_app(config, client=client)
+
+    with patch("naarad.jobs.market_close.datetime") as m_dt:
+        m_dt.now.return_value = WEEKDAY
+        await market_close.run(app)
+
+    text = app.bot.send_message.await_args.kwargs["text"]
+    assert "GOOGL" in text
+    assert "early close" in text
+    assert "Christmas Eve" in text
+    assert "$182.45" in text  # quote still rendered
+
+
+@pytest.mark.asyncio
+async def test_get_exchange_status_failure_treated_as_open(tmp_path: Path) -> None:
+    """If the holiday lookup raises, the job continues as if open."""
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    db.add_ticker(config.db_path, "GOOGL")
+
+    client = MagicMock()
+    client.get_exchange_status.side_effect = RuntimeError("network down")
+    client.real_time_quote.return_value = make_quote("GOOGL")
+
+    app = make_app(config, client=client)
+
+    with patch("naarad.jobs.market_open.datetime") as m_dt:
+        m_dt.now.return_value = WEEKDAY
+        await market_open.run(app)
+
+    app.bot.send_message.assert_awaited_once()
+    text = app.bot.send_message.await_args.kwargs["text"]
+    assert "GOOGL" in text
 
 
 # ---- scheduler.kickoff ------------------------------------------------------

@@ -3,6 +3,11 @@
 Fires daily at config.schedules.market_close in config.tickers.market_timezone
 (default 16:05 America/New_York). Skipped on weekends, when the runtime kill
 switch is off, or when the watchlist is empty.
+
+Per-exchange holiday handling: same as market_open, except EarlyClose days
+get an extra ``⏰ X on early close`` header line — the 16:05 tick is hours
+after the actual ~13:00 early close, so the data is technically stale but
+the header makes that explicit.
 """
 from __future__ import annotations
 
@@ -14,33 +19,53 @@ from telegram.ext import Application, ContextTypes
 from naarad import db
 from naarad.config import Config
 from naarad.jobs._common import (
+    closed_holiday_lines,
+    early_close_lines,
+    evaluate_exchange_statuses,
     fetch_quotes_concurrent,
     fmt_pct,
     fmt_price,
     fmt_volume,
+    partition_by_exchange,
+    split_open_vs_closed,
 )
 from naarad.runtime import is_tickers_enabled
-from naarad.tickers.eodhd import EODHDClient, Quote
+from naarad.tickers.eodhd import EODHDClient, ExchangeDay, Quote
 
 log = logging.getLogger(__name__)
 
 JOB_NAME = "market-close"
 
 
-def _format_close(quotes: list[Quote]) -> str:
+def _format_quote_line(q: Quote) -> str:
+    if q.is_empty:
+        return f"  • <code>{q.symbol}</code> — data unavailable"
+    return (
+        f"  • <code>{q.symbol}</code>  "
+        f"close {fmt_price(q.close)}  "
+        f"({fmt_pct(q.change_pct)})  "
+        f"hi {fmt_price(q.high)}  "
+        f"lo {fmt_price(q.low)}  "
+        f"vol {fmt_volume(q.volume)}"
+    )
+
+
+def _format_close(
+    quotes: list[Quote],
+    statuses: dict[str, ExchangeDay],
+    closed: dict[str, ExchangeDay],
+) -> str:
     lines = ["📉 <b>Market close</b>"]
+    lines.extend(early_close_lines(statuses))
     for q in quotes:
-        if q.is_empty:
-            lines.append(f"  • <code>{q.symbol}</code> — data unavailable")
-            continue
-        lines.append(
-            f"  • <code>{q.symbol}</code>  "
-            f"close {fmt_price(q.close)}  "
-            f"({fmt_pct(q.change_pct)})  "
-            f"hi {fmt_price(q.high)}  "
-            f"lo {fmt_price(q.low)}  "
-            f"vol {fmt_volume(q.volume)}"
-        )
+        lines.append(_format_quote_line(q))
+    lines.extend(closed_holiday_lines(closed))
+    return "\n".join(lines)
+
+
+def _format_all_closed(closed: dict[str, ExchangeDay]) -> str:
+    lines = ["📉 <b>Market close</b>"]
+    lines.extend(closed_holiday_lines(closed))
     return "\n".join(lines)
 
 
@@ -61,14 +86,27 @@ async def run(app: Application) -> None:
         log.info("market_close: empty watchlist, skipping")
         return
 
-    client: EODHDClient = app.bot_data["eodhd_client"]
-    try:
-        quotes = await fetch_quotes_concurrent(client, symbols)
-    except Exception:
-        log.exception("market_close: fetch failed")
+    groups = partition_by_exchange(symbols)
+    if not groups:
+        log.warning("market_close: no classifiable symbols in watchlist")
         return
 
-    body = _format_close(quotes)
+    client: EODHDClient = app.bot_data["eodhd_client"]
+    today = now_market.date()
+    statuses = await evaluate_exchange_statuses(client, list(groups), today)
+    fetchable, closed = split_open_vs_closed(groups, statuses)
+
+    if not fetchable:
+        body = _format_all_closed(closed)
+    else:
+        flat = [s for syms in fetchable.values() for s in syms]
+        try:
+            quotes = await fetch_quotes_concurrent(client, flat)
+        except Exception:
+            log.exception("market_close: fetch failed")
+            return
+        body = _format_close(quotes, statuses, closed)
+
     try:
         await app.bot.send_message(
             chat_id=config.telegram.chat_id,
