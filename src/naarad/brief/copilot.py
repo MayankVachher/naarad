@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 from datetime import date
 
+from naarad.brief.plain_renderer import render_plain_brief
 from naarad.brief.prompt import build_prompt
 from naarad.brief.sanitizer import sanitize_html
 from naarad.config import Config
@@ -22,15 +23,6 @@ from naarad.runtime import is_llm_enabled
 log = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = 600  # seconds; copilot can take a while
-
-
-def _fallback_brief(today: date, reason: str) -> str:
-    return (
-        f"<b>☀️ {today.strftime('%a %b ')}{today.day}{today.strftime(', %Y')}</b>\n"
-        "\n"
-        "(Copilot brief unavailable today — falling back to a placeholder.)\n"
-        f"<i>{reason}</i>"
-    )
 
 
 def get_daily_brief(today: date, config: Config, timeout: int = DEFAULT_TIMEOUT) -> str:
@@ -58,14 +50,17 @@ def get_daily_brief(today: date, config: Config, timeout: int = DEFAULT_TIMEOUT)
 
 
 def _render_plain_brief_safe(today: date, config: Config) -> str:
-    """Phase A: placeholder. Phase B will replace with the real plain renderer."""
-    # Lazy import so Phase B can swap implementations without import cycles.
-    try:
-        from naarad.brief.plain_renderer import render_plain_brief
-    except ImportError:
-        return _fallback_brief(today, "LLM disabled (plain renderer not yet available)")
+    """Run the plain renderer, with one last try/except so a crash here can't
+    take down the morning post. The renderer already handles source-fetch
+    failures internally — this catches anything truly unexpected.
+    """
     try:
         return render_plain_brief(today, config)
     except Exception:
-        log.exception("plain renderer crashed; falling back to placeholder")
-        return _fallback_brief(today, "plain renderer crashed — see logs")
+        log.exception("plain renderer crashed; emitting bare placeholder")
+        header = today.strftime("%a %b ") + str(today.day) + today.strftime(", %Y")
+        return (
+            f"<b>☀️ {header}</b>\n\n"
+            "(Brief unavailable today — both the LLM and the plain renderer failed. "
+            "See logs.)"
+        )
