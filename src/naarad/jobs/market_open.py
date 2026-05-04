@@ -103,6 +103,7 @@ async def run(app: Application) -> None:
             text=body,
             parse_mode="HTML",
             disable_web_page_preview=True,
+            disable_notification=True,
         )
     except Exception:
         log.exception("market_open: send failed")
