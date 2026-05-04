@@ -21,6 +21,7 @@ from naarad.config import Config, load_config
 from naarad.handlers import brief as brief_handlers
 from naarad.handlers import llm as llm_handlers
 from naarad.handlers import morning as morning_handlers
+from naarad.handlers import quote as quote_handlers
 from naarad.handlers import status as status_handlers
 from naarad.handlers import tickers as ticker_handlers
 from naarad.handlers import water as water_handlers
@@ -39,7 +40,8 @@ BOT_COMMANDS: list[BotCommand] = [
     BotCommand("brief", "re-run today's morning brief"),
     BotCommand("llm", "toggle LLM features (on|off)"),
     BotCommand("status", "bot health: water, day, LLM"),
-    BotCommand("ticker", "manage watchlist (add|remove|list)"),
+    BotCommand("ticker", "manage watchlist (add|remove|list|on|off)"),
+    BotCommand("quote", "real-time quote for one symbol"),
     BotCommand("help", "show command reference"),
 ]
 
@@ -58,6 +60,7 @@ def build_application(config: Config) -> Application:
     app.add_handler(CommandHandler("brief", brief_handlers.brief_command))
     app.add_handler(CommandHandler("llm", llm_handlers.llm_command))
     app.add_handler(CommandHandler("ticker", ticker_handlers.ticker_command))
+    app.add_handler(CommandHandler("quote", quote_handlers.quote_command))
     app.add_handler(CommandHandler("status", status_handlers.status_command))
     app.add_handler(CommandHandler(["help", "start"], status_handlers.help_command))
     app.add_handler(CallbackQueryHandler(
