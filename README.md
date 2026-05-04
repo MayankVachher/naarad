@@ -132,7 +132,7 @@ uv run pytest
 uv run ruff check src tests
 ```
 
-Tests cover the water state machine, water scheduler integration, DB layer, brief HTML sanitizer, plain renderer, runtime flag, and startup validation (70 tests across `tests/`). Ruff lints + sorts imports + catches common bugs.
+Tests cover the water state machine, water scheduler integration, DB layer, brief HTML sanitizer, plain renderer, runtime flag, startup validation, and Telegram command handlers (88 tests across `tests/`). Ruff lints + sorts imports + catches common bugs.
 
 ## License
 
