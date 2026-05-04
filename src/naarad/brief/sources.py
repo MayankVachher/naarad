@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import logging
 import re
-import socket
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Iterable
@@ -115,7 +114,6 @@ def _fetch_feed(url: str, source: str, max_items: int = MAX_PER_FEED) -> list[He
     Using httpx for the network layer (so we get a real timeout) and feeding
     bytes into feedparser; feedparser's own URL fetcher has no timeout knob.
     """
-    socket.setdefaulttimeout(PER_FETCH_TIMEOUT)  # belt-and-suspenders for feedparser
     try:
         with httpx.Client(timeout=PER_FETCH_TIMEOUT, headers={"User-Agent": USER_AGENT}) as client:
             resp = client.get(url, follow_redirects=True)
