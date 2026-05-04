@@ -27,6 +27,16 @@ class EodhdConfig(BaseModel):
     api_key: str
 
 
+class LLMConfig(BaseModel):
+    """Compile-time floor for LLM features.
+
+    `enabled: false` permanently disables LLM-powered brief + water reminders;
+    the runtime `/llm` command can't override this. When `enabled: true`, the
+    runtime DB-backed flag (settings.llm_enabled) decides the live state.
+    """
+    enabled: bool = True
+
+
 class WaterConfig(BaseModel):
     active_end: str = "21:00"
     intervals_minutes: list[int] = Field(default_factory=lambda: [120, 60, 30, 15, 5])
@@ -74,6 +84,7 @@ class Config(BaseModel):
     water: WaterConfig = Field(default_factory=WaterConfig)
     brief: BriefConfig = Field(default_factory=BriefConfig)
     morning: MorningConfig = Field(default_factory=MorningConfig)
+    llm: LLMConfig = Field(default_factory=LLMConfig)
     tickers_default: list[str] = Field(default_factory=list)
     schedules: SchedulesConfig = Field(default_factory=SchedulesConfig)
     db_path: str = "state.db"

@@ -1,0 +1,110 @@
+"""Tests for `naarad.runtime.is_llm_enabled` truth table and DB settings helpers."""
+from __future__ import annotations
+
+import sqlite3
+from pathlib import Path
+
+import pytest
+
+from naarad import db
+from naarad.config import (
+    BriefConfig,
+    Config,
+    EodhdConfig,
+    LLMConfig,
+    MorningConfig,
+    SchedulesConfig,
+    TelegramConfig,
+    WaterConfig,
+)
+from naarad.runtime import LLM_FLAG_KEY, is_llm_enabled, set_llm_runtime
+
+
+def make_config(tmp_path: Path, *, llm_enabled: bool = True) -> Config:
+    return Config(
+        telegram=TelegramConfig(token="123:ABCDEFGHIJKLMNOPQRSTUVWXYZ", chat_id=42),
+        eodhd=EodhdConfig(api_key="x"),
+        timezone="America/Toronto",
+        water=WaterConfig(),
+        brief=BriefConfig(),
+        morning=MorningConfig(),
+        llm=LLMConfig(enabled=llm_enabled),
+        schedules=SchedulesConfig(),
+        db_path=str(tmp_path / "state.db"),
+    )
+
+
+@pytest.fixture
+def fresh_db(tmp_path: Path) -> Path:
+    db_path = tmp_path / "state.db"
+    db.init_db(db_path)
+    return db_path
+
+
+# ---- settings table ----------------------------------------------------------
+
+def test_settings_table_exists_after_init(fresh_db: Path) -> None:
+    with sqlite3.connect(fresh_db) as conn:
+        rows = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='settings'"
+        ).fetchall()
+    assert rows == [("settings",)]
+
+
+def test_get_setting_returns_default_when_missing(fresh_db: Path) -> None:
+    assert db.get_setting(fresh_db, "missing", default="fallback") == "fallback"
+    assert db.get_setting(fresh_db, "missing") is None
+
+
+def test_set_setting_inserts_then_updates(fresh_db: Path) -> None:
+    db.set_setting(fresh_db, "k", "v1")
+    assert db.get_setting(fresh_db, "k") == "v1"
+    db.set_setting(fresh_db, "k", "v2")
+    assert db.get_setting(fresh_db, "k") == "v2"
+
+
+# ---- is_llm_enabled truth table ---------------------------------------------
+
+def test_default_is_enabled_when_unset(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    assert is_llm_enabled(config, config.db_path) is True
+
+
+def test_config_floor_overrides_runtime(tmp_path: Path) -> None:
+    config = make_config(tmp_path, llm_enabled=False)
+    db.init_db(config.db_path)
+    set_llm_runtime(config.db_path, enabled=True)
+    assert is_llm_enabled(config, config.db_path) is False
+
+
+def test_runtime_off_disables(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    set_llm_runtime(config.db_path, enabled=False)
+    assert is_llm_enabled(config, config.db_path) is False
+
+
+def test_runtime_toggle_round_trip(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    set_llm_runtime(config.db_path, enabled=False)
+    assert is_llm_enabled(config, config.db_path) is False
+    set_llm_runtime(config.db_path, enabled=True)
+    assert is_llm_enabled(config, config.db_path) is True
+
+
+def test_runtime_persistence_in_db(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    set_llm_runtime(config.db_path, enabled=False)
+    # Simulate restart by re-reading via raw helper.
+    assert db.get_setting(config.db_path, LLM_FLAG_KEY) == "0"
+
+
+def test_db_path_defaults_to_config_when_omitted(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    set_llm_runtime(config.db_path, enabled=False)
+    # Call without db_path; helper should fall back to config.db_path.
+    assert is_llm_enabled(config) is False

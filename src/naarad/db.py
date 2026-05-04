@@ -16,7 +16,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Iterator
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def _to_iso_dt(value: datetime | None) -> str | None:
@@ -91,6 +91,11 @@ def init_db(db_path: str | Path, seed_tickers: list[str] | None = None) -> None:
                     start_button_message_id  INTEGER
                 );
 
+                CREATE TABLE IF NOT EXISTS settings (
+                    key   TEXT PRIMARY KEY,
+                    value TEXT
+                );
+
                 INSERT OR IGNORE INTO water_state (id, level) VALUES (1, 0);
                 """
             )
@@ -110,6 +115,17 @@ def init_db(db_path: str | Path, seed_tickers: list[str] | None = None) -> None:
                 )
             conn.execute("UPDATE schema_version SET version = ?", (2,))
             current = 2
+
+        if current < 3:
+            # v2 -> v3: add settings key-value table for runtime flags.
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS settings ("
+                "  key   TEXT PRIMARY KEY,"
+                "  value TEXT"
+                ")"
+            )
+            conn.execute("UPDATE schema_version SET version = ?", (3,))
+            current = 3
 
         if seed_tickers:
             existing = {r["symbol"] for r in conn.execute("SELECT symbol FROM tickers")}
@@ -229,3 +245,22 @@ def mark_day_started(db_path: str | Path, today: date) -> None:
         last_reminder_at=None,
         level=0,
     )
+
+
+# ---------- Settings (key-value) ----------
+
+def get_setting(db_path: str | Path, key: str, default: str | None = None) -> str | None:
+    with connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT value FROM settings WHERE key = ?", (key,)
+        ).fetchone()
+    return row["value"] if row else default
+
+
+def set_setting(db_path: str | Path, key: str, value: str) -> None:
+    with connect(db_path) as conn:
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )

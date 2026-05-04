@@ -9,6 +9,7 @@ from telegram.ext import ContextTypes
 from naarad import db
 from naarad.config import Config
 from naarad.handlers.auth import reject_unauthorized
+from naarad.runtime import is_llm_enabled
 from naarad.water.scheduler import water_config_from
 from naarad.water.state import Idle, Reminder, Sleep, WaterState, next_action
 
@@ -16,7 +17,8 @@ HELP_TEXT = (
     "<b>Naarad commands</b>\n"
     "/water — confirm you drank water (resets the chain)\n"
     "/brief — re-run today's morning brief on demand\n"
-    "/status — bot health: last drink, day-started, next reminder\n"
+    "/llm on|off — toggle LLM features at runtime\n"
+    "/status — bot health: last drink, day-started, next reminder, LLM\n"
     "/help — this message\n"
     "\n"
     "<b>Daily flow</b>\n"
@@ -75,12 +77,15 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     )
     next_str = _describe_next_action(next_action(state, now, water_config_from(config)))
 
+    llm_state = "on" if is_llm_enabled(config, config.db_path) else "off"
+
     await update.message.reply_text(
         f"<b>Naarad status</b>\n"
         f"Day started: {'yes' if day_started else 'no'}\n"
         f"Next reminder: {next_str}\n"
         f"Last drink: {last_str}\n"
         f"Water level: {raw['level']}\n"
+        f"LLM: {llm_state}\n"
         f"Tickers (dormant): {', '.join(tickers) if tickers else '(none)'}\n"
         f"Timezone: {config.timezone}",
         parse_mode="HTML",

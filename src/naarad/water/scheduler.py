@@ -23,6 +23,7 @@ from telegram.ext import Application, ContextTypes
 from naarad import db
 from naarad.config import Config
 from naarad.water import copilot as water_copilot, messages
+from naarad.runtime import is_llm_enabled
 from naarad.water.state import (
     Idle,
     Reminder,
@@ -69,7 +70,9 @@ def _confirm_keyboard() -> InlineKeyboardMarkup:
 async def _send_reminder(
     app: Application, config: Config, level: int
 ) -> Message:
-    text = await water_copilot.generate_reminder_line(level)
+    text = ""
+    if is_llm_enabled(config):
+        text = await water_copilot.generate_reminder_line(level)
     if not text:
         text = messages.reminder_text(level)
     msg = await app.bot.send_message(

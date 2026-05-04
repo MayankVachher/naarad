@@ -20,6 +20,9 @@
     "start_time": "06:00",
     "fallback_time": "11:00"
   },
+  "llm": {
+    "enabled": true
+  },
   "tickers_default": ["SPY", "QQQ", "AAPL"],
   "schedules": {
     "market_open": "09:35",
