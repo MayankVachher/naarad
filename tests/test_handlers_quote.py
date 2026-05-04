@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -23,7 +23,12 @@ from naarad.config import (
 )
 from naarad.handlers.quote import quote_command
 from naarad.runtime import TICKERS_FLAG_KEY
-from naarad.tickers.eodhd import Quote
+from naarad.tickers.eodhd import ExchangeDay, ExchangeStatus, Quote
+
+# Frozen Tuesday so the weekend gate doesn't fire by accident.
+WEEKDAY = datetime(2025, 10, 14, 11, 0, tzinfo=ZoneInfo("America/New_York"))
+SATURDAY = datetime(2025, 10, 18, 11, 0, tzinfo=ZoneInfo("America/New_York"))
+CHRISTMAS = datetime(2025, 12, 25, 11, 0, tzinfo=ZoneInfo("America/New_York"))
 
 
 def make_config(tmp_path: Path, *, tickers_enabled: bool = True, eodhd_key: str = "x") -> Config:
@@ -206,3 +211,132 @@ async def test_fetch_failure_is_user_friendly(tmp_path: Path) -> None:
     text = _last_reply(update)
     assert "Couldn't fetch" in text
     assert "GOOGL" in text
+
+
+# ---- closed-exchange notes --------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_prepends_weekend_note(tmp_path: Path) -> None:
+    """Saturday → '📅 US closed today — weekend' line above the quote block."""
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+
+    client = MagicMock()
+    client.real_time_quote.return_value = make_quote("GOOGL")
+    update = make_update()
+
+    with patch("naarad.handlers.quote.datetime") as m_dt:
+        m_dt.now.return_value = SATURDAY
+        await quote_command(update, make_context(config, args=["GOOGL"], client=client))
+
+    text = _last_reply(update)
+    assert "<b>US closed today</b>" in text
+    assert "weekend" in text
+    # Quote still rendered (last trade is what the user wants to see).
+    assert "<b>GOOGL</b>" in text
+    assert "<b>Price</b>:" in text
+    # Weekend short-circuits the holiday lookup.
+    client.get_exchange_status.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_prepends_holiday_note(tmp_path: Path) -> None:
+    """Weekday holiday → '📅 US closed today — Christmas Day' line."""
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+
+    client = MagicMock()
+    client.get_exchange_status.return_value = ExchangeDay(
+        status=ExchangeStatus.CLOSED_HOLIDAY, name="Christmas Day"
+    )
+    client.real_time_quote.return_value = make_quote("GOOGL")
+    update = make_update()
+
+    with patch("naarad.handlers.quote.datetime") as m_dt:
+        m_dt.now.return_value = CHRISTMAS
+        await quote_command(update, make_context(config, args=["GOOGL"], client=client))
+
+    text = _last_reply(update)
+    assert "<b>US closed today</b>" in text
+    assert "Christmas Day" in text
+    assert "<b>GOOGL</b>" in text
+    client.get_exchange_status.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_no_note_when_exchange_open(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+
+    client = MagicMock()
+    client.get_exchange_status.return_value = ExchangeDay(status=ExchangeStatus.OPEN)
+    client.real_time_quote.return_value = make_quote("GOOGL")
+    update = make_update()
+
+    with patch("naarad.handlers.quote.datetime") as m_dt:
+        m_dt.now.return_value = WEEKDAY
+        await quote_command(update, make_context(config, args=["GOOGL"], client=client))
+
+    text = _last_reply(update)
+    assert "closed today" not in text
+
+
+@pytest.mark.asyncio
+async def test_no_note_on_early_close_day(tmp_path: Path) -> None:
+    """EarlyClose days still trade — no closed-today note (matches market_open)."""
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+
+    client = MagicMock()
+    client.get_exchange_status.return_value = ExchangeDay(
+        status=ExchangeStatus.EARLY_CLOSE, name="Christmas Eve"
+    )
+    client.real_time_quote.return_value = make_quote("GOOGL")
+    update = make_update()
+
+    with patch("naarad.handlers.quote.datetime") as m_dt:
+        m_dt.now.return_value = WEEKDAY
+        await quote_command(update, make_context(config, args=["GOOGL"], client=client))
+
+    text = _last_reply(update)
+    assert "closed today" not in text
+
+
+@pytest.mark.asyncio
+async def test_holiday_lookup_failure_falls_back_to_no_note(tmp_path: Path) -> None:
+    """If the EODHD calendar call raises, /quote still answers — just without context."""
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+
+    client = MagicMock()
+    client.get_exchange_status.side_effect = RuntimeError("network down")
+    client.real_time_quote.return_value = make_quote("GOOGL")
+    update = make_update()
+
+    with patch("naarad.handlers.quote.datetime") as m_dt:
+        m_dt.now.return_value = WEEKDAY
+        await quote_command(update, make_context(config, args=["GOOGL"], client=client))
+
+    text = _last_reply(update)
+    assert "closed today" not in text
+    assert "<b>GOOGL</b>" in text
+    assert "<b>Price</b>:" in text
+
+
+@pytest.mark.asyncio
+async def test_tsx_weekend_note(tmp_path: Path) -> None:
+    """Weekend note uses the symbol's exchange (TSX, not US)."""
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+
+    client = MagicMock()
+    client.real_time_quote.return_value = make_quote("VFV.TO")
+    update = make_update()
+
+    with patch("naarad.handlers.quote.datetime") as m_dt:
+        m_dt.now.return_value = SATURDAY
+        await quote_command(update, make_context(config, args=["vfv.to"], client=client))
+
+    text = _last_reply(update)
+    assert "<b>TSX closed today</b>" in text
+    assert "weekend" in text
