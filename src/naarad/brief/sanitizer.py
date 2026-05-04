@@ -42,7 +42,7 @@ def sanitize_html(text: str) -> str:
     text = re.sub(r"&(?!(?:amp|lt|gt|quot|apos|#\d+);)", "&amp;", text)
 
     # 3) Escape '<' / '>' that aren't around a whitelisted tag.
-    def _esc_tag(m: "re.Match[str]") -> str:
+    def _esc_tag(m: re.Match[str]) -> str:
         tag = m.group(1).strip().lower().split()[0] if m.group(1).strip() else ""
         if tag in _ALLOWED_TAGS:
             return m.group(0)

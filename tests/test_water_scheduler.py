@@ -22,6 +22,8 @@ from naarad.config import (
     MorningConfig,
     SchedulesConfig,
     TelegramConfig,
+)
+from naarad.config import (
     WaterConfig as ConfigWater,
 )
 from naarad.water import copilot as water_copilot

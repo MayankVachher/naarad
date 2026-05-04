@@ -22,8 +22,9 @@ from telegram.ext import Application, ContextTypes
 
 from naarad import db
 from naarad.config import Config
-from naarad.water import copilot as water_copilot, messages
 from naarad.runtime import is_llm_enabled
+from naarad.water import copilot as water_copilot
+from naarad.water import messages
 from naarad.water.state import (
     Idle,
     Reminder,

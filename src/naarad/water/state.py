@@ -30,7 +30,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta
-from typing import Union
 from zoneinfo import ZoneInfo
 
 
@@ -71,7 +70,7 @@ class Idle:
     """
 
 
-Action = Union[Reminder, Sleep, Idle]
+Action = Reminder | Sleep | Idle
 
 
 # --- Helpers ---

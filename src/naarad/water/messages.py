@@ -4,7 +4,6 @@ Level 0..3 are escalating in tone; level 4+ is the floor.
 """
 from __future__ import annotations
 
-
 _TONES = (
     "💧 Time for water",
     "💧💧 Hey, hydrate",

@@ -129,9 +129,10 @@ You can also confirm water by tapping the **💧 Drank water** button on any rem
 ```bash
 uv sync
 uv run pytest
+uv run ruff check src tests
 ```
 
-Tests cover the water state machine, water scheduler integration, DB layer, brief HTML sanitizer, and startup validation (49 tests across `tests/`).
+Tests cover the water state machine, water scheduler integration, DB layer, brief HTML sanitizer, plain renderer, runtime flag, and startup validation (70 tests across `tests/`). Ruff lints + sorts imports + catches common bugs.
 
 ## License
 
