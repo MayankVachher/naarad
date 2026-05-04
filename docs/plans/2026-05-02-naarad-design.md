@@ -1,5 +1,27 @@
 # Naarad — Design
 
+> ⚠️ **ARCHIVED — original Phase 1 design.** This document captures the
+> bot's design *before implementation*. Several details have evolved:
+>
+> - Daily brief moved from 08:00 → **06:00**.
+> - The brief is no longer a stub or an Anthropic API call — it's
+>   rendered by the **GitHub Copilot CLI** (`src/naarad/brief/copilot.py`)
+>   from pre-fetched RSS / weather / sun-times data.
+> - `morning_pinged_on` was replaced by `day_started_on` and a new
+>   `[☀️ Start day]` button flow (with an 11:00 auto-fallback) lives in
+>   `src/naarad/morning/` and `src/naarad/handlers/morning.py`.
+> - The bot now schedules everything in-process via JobQueue. Cron is an
+>   optional alternative; entries in `deploy/crontab.txt` are commented
+>   out by default.
+> - Water reminder one-liners are also Copilot-generated
+>   (`src/naarad/water/copilot.py`) with a hardcoded fallback in
+>   `src/naarad/water/messages.py`.
+> - Market jobs (EODHD path) are dormant pending a yfinance migration.
+>
+> Kept for historical context. For current state, read the source.
+
+---
+
 > **Naarad** (नारद): the divine messenger-sage who travels between realms delivering news and (famously) stirring the pot. Single-user Telegram bot that delivers a daily brief, market open/close updates for configured tickers, and escalating water reminders.
 
 ## Problem
