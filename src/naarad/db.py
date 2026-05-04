@@ -87,7 +87,6 @@ def init_db(db_path: str | Path, seed_tickers: list[str] | None = None) -> None:
                     last_reminder_at         TEXT,
                     level                    INTEGER NOT NULL DEFAULT 0,
                     last_msg_id              INTEGER,
-                    morning_pinged_on        TEXT,
                     day_started_on           TEXT,
                     start_button_message_id  INTEGER
                 );
@@ -159,7 +158,7 @@ def get_water_state(db_path: str | Path) -> dict:
     with connect(db_path) as conn:
         row = conn.execute(
             "SELECT last_drink_at, last_reminder_at, level, last_msg_id, "
-            "       morning_pinged_on, day_started_on, start_button_message_id "
+            "       day_started_on, start_button_message_id "
             "FROM water_state WHERE id = 1"
         ).fetchone()
     if row is None:
@@ -168,7 +167,6 @@ def get_water_state(db_path: str | Path) -> dict:
             "last_reminder_at": None,
             "level": 0,
             "last_msg_id": None,
-            "morning_pinged_on": None,
             "day_started_on": None,
             "start_button_message_id": None,
         }
@@ -177,7 +175,6 @@ def get_water_state(db_path: str | Path) -> dict:
         "last_reminder_at": _from_iso_dt(row["last_reminder_at"]),
         "level": row["level"],
         "last_msg_id": row["last_msg_id"],
-        "morning_pinged_on": _from_iso_date(row["morning_pinged_on"]),
         "day_started_on": _from_iso_date(row["day_started_on"]),
         "start_button_message_id": row["start_button_message_id"],
     }
@@ -195,7 +192,6 @@ def update_water_state(db_path: str | Path, **fields) -> None:
         "last_reminder_at",
         "level",
         "last_msg_id",
-        "morning_pinged_on",
         "day_started_on",
         "start_button_message_id",
     }
@@ -207,7 +203,7 @@ def update_water_state(db_path: str | Path, **fields) -> None:
     for k, v in fields.items():
         if k in ("last_drink_at", "last_reminder_at"):
             serialized[k] = _to_iso_dt(v)  # type: ignore[arg-type]
-        elif k in ("morning_pinged_on", "day_started_on"):
+        elif k == "day_started_on":
             serialized[k] = _to_iso_date(v)  # type: ignore[arg-type]
         else:
             serialized[k] = v
