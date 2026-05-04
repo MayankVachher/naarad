@@ -10,14 +10,19 @@ from naarad.handlers.auth import reject_unauthorized
 
 HELP_TEXT = (
     "<b>Naarad commands</b>\n"
-    "/water — confirm you drank water\n"
-    "/ticker add SYMBOL — track a ticker\n"
-    "/ticker remove SYMBOL — stop tracking\n"
-    "/ticker list — list tracked tickers\n"
-    "/status — bot health\n"
+    "/water — confirm you drank water (resets the chain)\n"
+    "/status — bot health: last drink, day-started, next reminder\n"
     "/help — this message\n"
     "\n"
-    "You can also tap the 💧 button on a reminder, or reply to a reminder."
+    "<b>Daily flow</b>\n"
+    "• 06:00 — silent morning brief drops with a [☀️ Start day] button.\n"
+    "• Tap Start (or wait until 11:00 for the auto-fallback) to kick off "
+    "the water reminder chain.\n"
+    "• Confirm water by tapping the 💧 button on a reminder, replying to "
+    "it with anything, or sending /water.\n"
+    "\n"
+    "<b>Tickers</b> (currently dormant pending yfinance migration):\n"
+    "/ticker add SYMBOL · /ticker remove SYMBOL · /ticker list"
 )
 
 
