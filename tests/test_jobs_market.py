@@ -230,6 +230,120 @@ async def test_market_open_renders_unavailable_for_failed_symbol(tmp_path: Path)
 
 # ---- per-exchange holiday + EarlyClose -------------------------------------
 
+# ---- DEMO 2 format -----------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_market_open_uses_demo2_format(tmp_path: Path) -> None:
+    """Per-symbol bullet block with bold header, Price/Prev/Chng labels,
+    and a 🟢 trailing the positive change.
+    """
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    db.add_ticker(config.db_path, "GOOGL")
+
+    client = MagicMock()
+    client.real_time_quote.return_value = make_quote("GOOGL")
+    app = make_app(config, client=client)
+
+    with patch("naarad.jobs.market_open.datetime") as m_dt:
+        m_dt.now.return_value = WEEKDAY
+        await market_open.run(app)
+
+    text = app.bot.send_message.await_args.kwargs["text"]
+    # Header carries date.
+    assert "Market open" in text
+    assert "Tue Oct 14" in text
+    # Per-symbol block.
+    assert "<b>GOOGL</b>" in text
+    assert "<b>Price</b>:" in text
+    assert "<b>Prev</b>:" in text
+    assert "<b>Chng</b>:" in text
+    # Positive change → green dot.
+    assert "🟢" in text
+    assert "🔴" not in text
+    assert "⚪" not in text
+
+
+@pytest.mark.asyncio
+async def test_market_open_negative_change_red_dot(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    db.add_ticker(config.db_path, "GOOGL")
+
+    client = MagicMock()
+    client.real_time_quote.return_value = make_quote("GOOGL", change_pct=-1.5)
+    app = make_app(config, client=client)
+
+    with patch("naarad.jobs.market_open.datetime") as m_dt:
+        m_dt.now.return_value = WEEKDAY
+        await market_open.run(app)
+
+    text = app.bot.send_message.await_args.kwargs["text"]
+    assert "🔴" in text
+    assert "🟢" not in text
+
+
+@pytest.mark.asyncio
+async def test_market_open_zero_change_neutral_dot(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    db.add_ticker(config.db_path, "GOOGL")
+
+    client = MagicMock()
+    client.real_time_quote.return_value = make_quote("GOOGL", change_pct=0.0)
+    app = make_app(config, client=client)
+
+    with patch("naarad.jobs.market_open.datetime") as m_dt:
+        m_dt.now.return_value = WEEKDAY
+        await market_open.run(app)
+
+    text = app.bot.send_message.await_args.kwargs["text"]
+    assert "⚪" in text
+
+
+@pytest.mark.asyncio
+async def test_market_close_uses_demo2_format(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    db.add_ticker(config.db_path, "GOOGL")
+
+    client = MagicMock()
+    client.real_time_quote.return_value = make_quote("GOOGL")
+    app = make_app(config, client=client)
+
+    with patch("naarad.jobs.market_close.datetime") as m_dt:
+        m_dt.now.return_value = WEEKDAY
+        await market_close.run(app)
+
+    text = app.bot.send_message.await_args.kwargs["text"]
+    assert "Market close" in text
+    assert "<b>Close</b>:" in text
+    assert "<b>Hi</b>:" in text
+    assert "<b>Lo</b>:" in text
+    assert "<b>Vol</b>:" in text
+    assert "1.23M" in text
+
+
+@pytest.mark.asyncio
+async def test_unavailable_quote_block_is_italic(tmp_path: Path) -> None:
+    """A failed quote becomes a one-line italic block under the symbol."""
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    db.add_ticker(config.db_path, "GOOGL")
+
+    client = MagicMock()
+    client.real_time_quote.side_effect = RuntimeError("boom")
+    app = make_app(config, client=client)
+
+    with patch("naarad.jobs.market_open.datetime") as m_dt:
+        m_dt.now.return_value = WEEKDAY
+        await market_open.run(app)
+
+    text = app.bot.send_message.await_args.kwargs["text"]
+    assert "<b>GOOGL</b>" in text
+    assert "<i>data unavailable</i>" in text
+
+
 @pytest.mark.asyncio
 async def test_market_open_us_closed_tsx_open(tmp_path: Path) -> None:
     """US is fully closed (Christmas), TSX still trades. Quotes only for TSX,

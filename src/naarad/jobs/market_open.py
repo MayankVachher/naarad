@@ -27,9 +27,10 @@ from naarad.jobs._common import (
     closed_holiday_lines,
     evaluate_exchange_statuses,
     fetch_quotes_concurrent,
-    fmt_pct,
-    fmt_price,
+    header_with_date,
+    join_blocks,
     partition_by_exchange,
+    render_open_block,
     split_open_vs_closed,
 )
 from naarad.runtime import is_tickers_enabled
@@ -40,29 +41,20 @@ log = logging.getLogger(__name__)
 JOB_NAME = "market-open"
 
 
-def _format_quote_line(q: Quote) -> str:
-    if q.is_empty:
-        return f"  • <code>{q.symbol}</code> — data unavailable"
-    return (
-        f"  • <code>{q.symbol}</code>  "
-        f"open {fmt_price(q.open)}  "
-        f"prev {fmt_price(q.previous_close)}  "
-        f"({fmt_pct(q.change_pct)})"
-    )
-
-
 def _format_open(
-    quotes: list[Quote], closed: dict[str, ExchangeDay]
+    quotes: list[Quote], closed: dict[str, ExchangeDay], when: datetime
 ) -> str:
-    lines = ["📈 <b>Market open</b>"]
-    for q in quotes:
-        lines.append(_format_quote_line(q))
-    lines.extend(closed_holiday_lines(closed))
-    return "\n".join(lines)
+    parts = [header_with_date("📈", "Market open", when), ""]
+    parts.append(join_blocks([render_open_block(q) for q in quotes]))
+    closed_lines = closed_holiday_lines(closed)
+    if closed_lines:
+        parts.append("")
+        parts.extend(closed_lines)
+    return "\n".join(parts)
 
 
-def _format_all_closed(closed: dict[str, ExchangeDay]) -> str:
-    lines = ["📈 <b>Market open</b>"]
+def _format_all_closed(closed: dict[str, ExchangeDay], when: datetime) -> str:
+    lines = [header_with_date("📈", "Market open", when), ""]
     lines.extend(closed_holiday_lines(closed))
     return "\n".join(lines)
 
@@ -95,7 +87,7 @@ async def run(app: Application) -> None:
     fetchable, closed = split_open_vs_closed(groups, statuses)
 
     if not fetchable:
-        body = _format_all_closed(closed)
+        body = _format_all_closed(closed, now_market)
     else:
         flat = [s for syms in fetchable.values() for s in syms]
         try:
@@ -103,7 +95,7 @@ async def run(app: Application) -> None:
         except Exception:
             log.exception("market_open: fetch failed")
             return
-        body = _format_open(quotes, closed)
+        body = _format_open(quotes, closed, now_market)
 
     try:
         await app.bot.send_message(
