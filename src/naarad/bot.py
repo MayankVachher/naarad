@@ -6,6 +6,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
+from telegram import BotCommand
 from telegram.ext import (
     Application,
     ApplicationBuilder,
@@ -29,6 +30,16 @@ from naarad.water import scheduler as water_scheduler
 from naarad.water.scheduler import CONFIRM_CALLBACK
 
 log = logging.getLogger(__name__)
+
+# Surfaced in Telegram's "/" autocomplete menu via setMyCommands.
+BOT_COMMANDS: list[BotCommand] = [
+    BotCommand("water", "confirm you drank water"),
+    BotCommand("brief", "re-run today's morning brief"),
+    BotCommand("llm", "toggle LLM features (on|off)"),
+    BotCommand("status", "bot health: water, day, LLM"),
+    BotCommand("ticker", "manage watchlist (add|remove|list)"),
+    BotCommand("help", "show command reference"),
+]
 
 
 def build_application(config: Config) -> Application:
@@ -58,6 +69,10 @@ def build_application(config: Config) -> Application:
     app.add_handler(MessageHandler(filters.REPLY & ~filters.COMMAND, water_handlers.water_reply))
 
     async def _post_init(app: Application) -> None:
+        try:
+            await app.bot.set_my_commands(BOT_COMMANDS)
+        except Exception:
+            log.exception("set_my_commands failed; / autocomplete may be stale")
         await water_scheduler.kickoff(app)
         await morning_scheduler.kickoff(app)
 
