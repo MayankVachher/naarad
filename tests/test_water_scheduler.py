@@ -16,7 +16,6 @@ import pytest
 
 from naarad import db
 from naarad.config import (
-    AnthropicConfig,
     BriefConfig,
     Config,
     EodhdConfig,
@@ -36,7 +35,6 @@ def make_config(db_path: Path) -> Config:
     return Config(
         telegram=TelegramConfig(token="x", chat_id=1),
         eodhd=EodhdConfig(api_key="x"),
-        anthropic=AnthropicConfig(api_key="x"),
         timezone="America/Toronto",
         water=ConfigWater(
             active_end="21:00",

@@ -27,10 +27,6 @@ class EodhdConfig(BaseModel):
     api_key: str
 
 
-class AnthropicConfig(BaseModel):
-    api_key: str = ""
-
-
 class WaterConfig(BaseModel):
     active_end: str = "21:00"
     intervals_minutes: list[int] = Field(default_factory=lambda: [120, 60, 30, 15, 5])
@@ -74,7 +70,6 @@ class SchedulesConfig(BaseModel):
 class Config(BaseModel):
     telegram: TelegramConfig
     eodhd: EodhdConfig
-    anthropic: AnthropicConfig = Field(default_factory=AnthropicConfig)
     timezone: str = "America/Toronto"
     water: WaterConfig = Field(default_factory=WaterConfig)
     brief: BriefConfig = Field(default_factory=BriefConfig)

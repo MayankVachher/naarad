@@ -6,9 +6,6 @@
   "eodhd": {
     "api_key": "PUT_EODHD_API_KEY_HERE"
   },
-  "anthropic": {
-    "api_key": "PUT_ANTHROPIC_API_KEY_HERE"
-  },
   "timezone": "America/Toronto",
   "water": {
     "active_end": "21:00",
