@@ -12,8 +12,6 @@ A single-user Telegram bot. Runs on a Raspberry Pi (or your laptop):
 
 A single long-running bot process. Daily brief + water reminders + the 11:00 fallback are all scheduled in-process via python-telegram-bot's `JobQueue`. SQLite holds state (water chain, day rollover, message ids).
 
-The `deploy/crontab.txt` entries exist as a Pi-friendly alternative for hosts that run only the long-poll loop with cron handling the brief separately, but they're commented out by default.
-
 See [`docs/plans/2026-05-02-naarad-design.md`](docs/plans/2026-05-02-naarad-design.md) for the original design (some details have evolved — see `plan.md` in the session for current state).
 
 ## Prerequisites
@@ -41,13 +39,56 @@ $EDITOR config.json   # fill in token + chat_id
 uv run python -m naarad.bot
 ```
 
-For Pi deployment with systemd:
+For Pi deployment with systemd, see the [Deploy on a Raspberry Pi](#deploy-on-a-raspberry-pi) section below.
+
+## Deploy on a Raspberry Pi
+
+These steps assume a fresh Raspberry Pi OS install on a Pi 4 or 5, the Pi already on your network, and a Telegram bot already created via BotFather.
 
 ```bash
-sudo cp deploy/naarad.service /etc/systemd/system/
+# 1. Install uv (https://docs.astral.sh/uv/getting-started/installation/)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source ~/.bashrc
+
+# 2. Install + sign in to the GitHub Copilot CLI (the brief and reminder
+#    generators shell out to `copilot`). Follow the official install guide
+#    for your platform; on a Pi you'll typically use the npm install:
+#       sudo apt install -y nodejs npm
+#       npm install -g @githubnext/github-copilot-cli   # or current package
+#    Then sign in with `copilot auth login`. Override the binary path via
+#    COPILOT_BIN if it isn't on PATH.
+
+# 3. Clone + setup
+git clone <repo> ~/naarad
+cd ~/naarad
+uv sync
+cp config.example.json config.json
+chmod 600 config.json
+$EDITOR config.json   # token, chat_id, location, etc.
+
+# 4. Smoke-test (you should see "startup validation passed" within a second)
+uv run python -m naarad.bot
+# Ctrl-C once you see the bot is happy.
+
+# 5. Install the systemd service (substitute placeholders for your user
+#    + install path).
+sed \
+  -e "s|@USER@|$USER|g" \
+  -e "s|@HOME@|$HOME|g" \
+  -e "s|@INSTALL_DIR@|$HOME/naarad|g" \
+  deploy/naarad.service.template | sudo tee /etc/systemd/system/naarad.service > /dev/null
 sudo systemctl daemon-reload
 sudo systemctl enable --now naarad
+
+# 6. Check status + logs
+systemctl status naarad
+journalctl -u naarad -f              # live tail
+tail -f ~/naarad/logs/naarad.log     # the rotating file logger's output
 ```
+
+Logs go to **two places** by design: journald (via systemd, available through `journalctl -u naarad`) and `logs/naarad.log` (rotating, 5 MB × 3 backups) inside the install directory. Pick whichever is more convenient for the question you're asking.
+
+To pull updates: `cd ~/naarad && git pull && uv sync && sudo systemctl restart naarad`.
 
 ## Configuration
 
@@ -72,10 +113,11 @@ Everything lives in `config.json` (gitignored). See `config.example.json` for th
 | Command | What it does |
 |---------|--------------|
 | `/water` | Confirm you drank water (resets the chain) |
+| `/brief` | Re-run today's morning brief on demand (good for prompt iteration) |
 | `/ticker add SYMBOL` | Track a new ticker (dormant until yfinance lands) |
 | `/ticker remove SYMBOL` | Stop tracking |
 | `/ticker list` | List tracked tickers |
-| `/status` | Bot health + last-drink time |
+| `/status` | Bot health: day-started, next reminder, last drink, level |
 | `/help` | Command reference |
 
 You can also confirm water by tapping the **💧 Drank water** button on any reminder, or by replying to a reminder with anything.
@@ -87,7 +129,7 @@ uv sync
 uv run pytest
 ```
 
-Tests cover the water state machine, water scheduler integration, and DB layer (32 tests across `tests/`).
+Tests cover the water state machine, water scheduler integration, DB layer, brief HTML sanitizer, and startup validation (49 tests across `tests/`).
 
 ## License
 

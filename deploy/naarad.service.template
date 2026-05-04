@@ -1,0 +1,37 @@
+# Naarad systemd unit — TEMPLATE.
+# Substitute @USER@, @HOME@, and @INSTALL_DIR@ before installing.
+# See the README "Deploy on a Raspberry Pi" section for the sed one-liner.
+
+[Unit]
+Description=Naarad Telegram bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+Group=@USER@
+WorkingDirectory=@INSTALL_DIR@
+# uv must be on PATH; if installed under ~/.local/bin, this works:
+Environment=PATH=@HOME@/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=@HOME@/.local/bin/uv run python -m naarad.bot
+Restart=on-failure
+RestartSec=5s
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=@INSTALL_DIR@
+ProtectKernelTunables=true
+ProtectControlGroups=true
+
+# Capture stdout/stderr to journald (`journalctl -u naarad`).
+# The bot also writes logs/naarad.log via RotatingFileHandler, independently.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=naarad
+
+[Install]
+WantedBy=multi-user.target
