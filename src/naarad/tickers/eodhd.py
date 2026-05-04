@@ -1,5 +1,10 @@
 """EODHD API client — real-time quotes and US exchange holiday calendar.
 
+DEPRECATED: this module is no longer wired into the live bot. The market_open
+/ market_close cron jobs are commented out in deploy/crontab.txt, and the
+plan is to replace EODHD with yfinance (see Phase 10 in plan.md). Kept as
+reference for the upcoming migration. Don't add new callers here.
+
 Docs: https://eodhd.com/financial-apis/
 We use:
 - /api/real-time/{symbol} for current open/high/low/close/prev-close/change.

@@ -1,4 +1,8 @@
-"""Shared helpers for market_open and market_close cron jobs."""
+"""Shared helpers for market_open and market_close cron jobs.
+
+DEPRECATED alongside jobs/market_open.py and jobs/market_close.py. Pending
+replacement by yfinance-backed helpers (Phase 10).
+"""
 from __future__ import annotations
 
 import logging

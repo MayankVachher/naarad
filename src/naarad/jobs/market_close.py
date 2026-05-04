@@ -1,4 +1,9 @@
-"""Market-close cron job: posts close price + day's % change + high/low + volume."""
+"""Market-close cron job: posts close price + day's % change + high/low + volume.
+
+DEPRECATED: cron entry is disabled in deploy/crontab.txt and the in-process
+scheduler does not invoke this. Pending replacement by a yfinance-backed
+job (Phase 10).
+"""
 from __future__ import annotations
 
 import logging
