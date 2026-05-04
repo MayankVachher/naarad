@@ -154,7 +154,6 @@ name = "naarad"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "apscheduler" },
     { name = "astral" },
     { name = "feedparser" },
     { name = "httpx" },
@@ -172,7 +171,6 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "apscheduler", specifier = ">=3.10" },
     { name = "astral", specifier = ">=3.2" },
     { name = "feedparser", specifier = ">=6.0" },
     { name = "httpx", specifier = ">=0.27" },

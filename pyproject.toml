@@ -8,7 +8,6 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "python-telegram-bot[job-queue]>=21.6",
-    "apscheduler>=3.10",
     "httpx>=0.27",
     "pydantic>=2.8",
     "tzdata>=2024.1",
@@ -25,9 +24,6 @@ dev = [
 
 [project.scripts]
 naarad = "naarad.bot:main"
-naarad-daily-brief = "naarad.jobs.daily_brief:main"
-naarad-market-open = "naarad.jobs.market_open:main"
-naarad-market-close = "naarad.jobs.market_close:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
