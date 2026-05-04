@@ -15,6 +15,7 @@ from naarad.water.state import Idle, Reminder, Sleep, WaterState, next_action
 HELP_TEXT = (
     "<b>Naarad commands</b>\n"
     "/water — confirm you drank water (resets the chain)\n"
+    "/brief — re-run today's morning brief on demand\n"
     "/status — bot health: last drink, day-started, next reminder\n"
     "/help — this message\n"
     "\n"
