@@ -1,6 +1,8 @@
 # naarad
 
-> **नारद** — the divine messenger-sage who travels between realms delivering news (and famously stirring the pot).
+> **नारद** — the wandering sage of Hindu and Buddhist tradition. He travels between realms delivering news, parables, and the occasional pointed nudge (with a legendary fondness for stirring the pot).
+>
+> The fit is on the nose: this bot pings you each morning with a brief from the world, escalates its water reminders when ignored, and generally acts as the messenger-sage who's decided your inbox is his beat.
 
 A single-user Telegram bot. Runs on a Raspberry Pi (or your laptop):
 
