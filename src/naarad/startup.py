@@ -100,10 +100,25 @@ def _check_copilot_available() -> None:
     log.info("copilot CLI ok: %s", (result.stdout or "").strip().splitlines()[0])
 
 
+def _validate_eodhd_for_tickers(config: Config) -> None:
+    """If tickers are enabled at the config floor, require a non-empty EODHD
+    API key. Without it, the scheduled jobs would 401 silently every tick.
+    """
+    if not config.tickers.enabled:
+        return
+    key = (config.eodhd.api_key or "").strip()
+    if not key:
+        raise StartupValidationError(
+            "config.tickers.enabled=true but config.eodhd.api_key is empty. "
+            "Either set tickers.enabled=false or fill in a real EODHD key."
+        )
+
+
 def validate_startup(config: Config) -> None:
     """Run all startup checks. Raises StartupValidationError on fatal issues."""
     _validate_token(config.telegram.token)
     _validate_chat_id(config.telegram.chat_id)
     _validate_db_writable(config.db_path)
+    _validate_eodhd_for_tickers(config)
     _check_copilot_available()
     log.info("startup validation passed")

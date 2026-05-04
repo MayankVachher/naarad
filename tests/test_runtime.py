@@ -15,12 +15,25 @@ from naarad.config import (
     MorningConfig,
     SchedulesConfig,
     TelegramConfig,
+    TickersConfig,
     WaterConfig,
 )
-from naarad.runtime import LLM_FLAG_KEY, is_llm_enabled, set_llm_runtime
+from naarad.runtime import (
+    LLM_FLAG_KEY,
+    TICKERS_FLAG_KEY,
+    is_llm_enabled,
+    is_tickers_enabled,
+    set_llm_runtime,
+    set_tickers_runtime,
+)
 
 
-def make_config(tmp_path: Path, *, llm_enabled: bool = True) -> Config:
+def make_config(
+    tmp_path: Path,
+    *,
+    llm_enabled: bool = True,
+    tickers_enabled: bool = True,
+) -> Config:
     return Config(
         telegram=TelegramConfig(token="123:ABCDEFGHIJKLMNOPQRSTUVWXYZ", chat_id=42),
         eodhd=EodhdConfig(api_key="x"),
@@ -29,6 +42,7 @@ def make_config(tmp_path: Path, *, llm_enabled: bool = True) -> Config:
         brief=BriefConfig(),
         morning=MorningConfig(),
         llm=LLMConfig(enabled=llm_enabled),
+        tickers=TickersConfig(enabled=tickers_enabled),
         schedules=SchedulesConfig(),
         db_path=str(tmp_path / "state.db"),
     )
@@ -108,3 +122,57 @@ def test_db_path_defaults_to_config_when_omitted(tmp_path: Path) -> None:
     set_llm_runtime(config.db_path, enabled=False)
     # Call without db_path; helper should fall back to config.db_path.
     assert is_llm_enabled(config) is False
+
+
+# ---- is_tickers_enabled truth table -----------------------------------------
+
+def test_tickers_default_is_enabled_when_unset(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    assert is_tickers_enabled(config, config.db_path) is True
+
+
+def test_tickers_config_floor_overrides_runtime(tmp_path: Path) -> None:
+    config = make_config(tmp_path, tickers_enabled=False)
+    db.init_db(config.db_path)
+    set_tickers_runtime(config.db_path, enabled=True)
+    assert is_tickers_enabled(config, config.db_path) is False
+
+
+def test_tickers_runtime_off_disables(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    set_tickers_runtime(config.db_path, enabled=False)
+    assert is_tickers_enabled(config, config.db_path) is False
+
+
+def test_tickers_runtime_toggle_round_trip(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    set_tickers_runtime(config.db_path, enabled=False)
+    assert is_tickers_enabled(config, config.db_path) is False
+    set_tickers_runtime(config.db_path, enabled=True)
+    assert is_tickers_enabled(config, config.db_path) is True
+
+
+def test_tickers_runtime_persists_in_db(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    set_tickers_runtime(config.db_path, enabled=False)
+    assert db.get_setting(config.db_path, TICKERS_FLAG_KEY) == "0"
+
+
+def test_tickers_db_path_defaults_to_config(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    set_tickers_runtime(config.db_path, enabled=False)
+    assert is_tickers_enabled(config) is False
+
+
+def test_tickers_and_llm_flags_are_independent(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    set_llm_runtime(config.db_path, enabled=False)
+    set_tickers_runtime(config.db_path, enabled=True)
+    assert is_llm_enabled(config) is False
+    assert is_tickers_enabled(config) is True

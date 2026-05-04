@@ -13,12 +13,19 @@ from naarad.config import (
     MorningConfig,
     SchedulesConfig,
     TelegramConfig,
+    TickersConfig,
     WaterConfig,
 )
 from naarad.startup import StartupValidationError, validate_startup
 
 
-def make_config(tmp_path: Path, **telegram_overrides) -> Config:
+def make_config(
+    tmp_path: Path,
+    *,
+    eodhd_key: str = "unused",
+    tickers_enabled: bool = True,
+    **telegram_overrides,
+) -> Config:
     telegram = {
         "token": "123456:abcdefghijklmnopqrstuvwxyz0123456789",
         "chat_id": 42,
@@ -26,11 +33,12 @@ def make_config(tmp_path: Path, **telegram_overrides) -> Config:
     }
     return Config(
         telegram=TelegramConfig(**telegram),
-        eodhd=EodhdConfig(api_key="unused"),
+        eodhd=EodhdConfig(api_key=eodhd_key),
         timezone="America/Toronto",
         water=WaterConfig(),
         brief=BriefConfig(),
         morning=MorningConfig(),
+        tickers=TickersConfig(enabled=tickers_enabled),
         tickers_default=[],
         schedules=SchedulesConfig(),
         db_path=str(tmp_path / "state.db"),
@@ -91,3 +99,22 @@ def test_copilot_check_logs_warning_on_missing_binary(tmp_path, monkeypatch, cap
     with caplog.at_level(logging.WARNING):
         validate_startup(cfg)  # should NOT raise
     assert "copilot CLI not found" in caplog.text
+
+
+def test_rejects_empty_eodhd_key_when_tickers_enabled(tmp_path, stub_copilot):
+    cfg = make_config(tmp_path, eodhd_key="", tickers_enabled=True)
+    with pytest.raises(StartupValidationError, match="eodhd.api_key"):
+        validate_startup(cfg)
+
+
+def test_rejects_whitespace_only_eodhd_key_when_tickers_enabled(tmp_path, stub_copilot):
+    cfg = make_config(tmp_path, eodhd_key="   ", tickers_enabled=True)
+    with pytest.raises(StartupValidationError, match="eodhd.api_key"):
+        validate_startup(cfg)
+
+
+def test_skips_eodhd_check_when_tickers_disabled(tmp_path, stub_copilot):
+    # If the user explicitly turned tickers off at the config floor, an empty
+    # EODHD key is fine — the feature is dormant anyway.
+    cfg = make_config(tmp_path, eodhd_key="", tickers_enabled=False)
+    validate_startup(cfg)  # must not raise

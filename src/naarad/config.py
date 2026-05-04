@@ -37,6 +37,36 @@ class LLMConfig(BaseModel):
     enabled: bool = True
 
 
+class TickersConfig(BaseModel):
+    """Compile-time floor + market-clock TZ for ticker features.
+
+    `enabled: false` permanently disables the market_open/market_close jobs
+    and the `/quote` command; the runtime `/ticker on|off` toggle is inert
+    in that case. When `enabled: true`, `settings.tickers_enabled` decides
+    the live state.
+
+    `market_timezone` is the wall-clock timezone the open/close schedules
+    fire in (default America/New_York). It's deliberately separate from the
+    user-facing `Config.timezone` so the morning/water schedulers can stay
+    on local time without dragging the market jobs along.
+    """
+    enabled: bool = True
+    market_timezone: str = "America/New_York"
+
+    @field_validator("market_timezone")
+    @classmethod
+    def _valid_market_tz(cls, v: str) -> str:
+        try:
+            ZoneInfo(v)
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError(f"unknown market_timezone: {v}") from exc
+        return v
+
+    @property
+    def market_tz(self) -> ZoneInfo:
+        return ZoneInfo(self.market_timezone)
+
+
 class WaterConfig(BaseModel):
     active_end: str = "21:00"
     intervals_minutes: list[int] = Field(default_factory=lambda: [120, 60, 30, 15, 5])
@@ -85,6 +115,7 @@ class Config(BaseModel):
     brief: BriefConfig = Field(default_factory=BriefConfig)
     morning: MorningConfig = Field(default_factory=MorningConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
+    tickers: TickersConfig = Field(default_factory=TickersConfig)
     tickers_default: list[str] = Field(default_factory=list)
     schedules: SchedulesConfig = Field(default_factory=SchedulesConfig)
     db_path: str = "state.db"
