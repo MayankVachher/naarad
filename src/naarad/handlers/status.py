@@ -9,7 +9,7 @@ from telegram.ext import ContextTypes
 from naarad import db
 from naarad.config import Config
 from naarad.handlers.auth import reject_unauthorized
-from naarad.runtime import is_llm_enabled
+from naarad.runtime import is_llm_enabled, is_tickers_enabled
 from naarad.water.scheduler import water_config_from
 from naarad.water.state import Idle, Reminder, Sleep, WaterState, next_action
 
@@ -18,7 +18,9 @@ HELP_TEXT = (
     "/water — confirm you drank water (resets the chain)\n"
     "/brief — re-run today's morning brief on demand\n"
     "/llm on|off — toggle LLM features at runtime\n"
-    "/status — bot health: last drink, day-started, next reminder, LLM\n"
+    "/ticker add|remove|list|on|off — manage the watchlist + kill switch\n"
+    "/quote SYMBOL — on-demand real-time quote\n"
+    "/status — bot health: water, day, LLM, tickers\n"
     "/help — this message\n"
     "\n"
     "<b>Daily flow</b>\n"
@@ -28,8 +30,11 @@ HELP_TEXT = (
     "• Confirm water by tapping the 💧 button on a reminder, replying to "
     "it with anything, or sending /water.\n"
     "\n"
-    "<b>Tickers</b> (currently dormant pending yfinance migration):\n"
-    "/ticker add SYMBOL · /ticker remove SYMBOL · /ticker list"
+    "<b>Tickers</b>\n"
+    "• 09:35 ET market_open + 16:05 ET market_close briefs Mon-Fri.\n"
+    "• Holidays per exchange (US / TSX) are recognised; a closed exchange "
+    "gets a single '📅 closed today' line and its quotes are skipped.\n"
+    "• Symbols: bare for US (GOOGL), '.TO' suffix for TSX (VFV.TO)."
 )
 
 
@@ -78,6 +83,12 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     next_str = _describe_next_action(next_action(state, now, water_config_from(config)))
 
     llm_state = "on" if is_llm_enabled(config, config.db_path) else "off"
+    if not config.tickers.enabled:
+        tickers_state = "off (config)"
+    elif is_tickers_enabled(config, config.db_path):
+        tickers_state = "on"
+    else:
+        tickers_state = "off (runtime)"
 
     await update.message.reply_text(
         f"<b>Naarad status</b>\n"
@@ -86,7 +97,8 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         f"Last drink: {last_str}\n"
         f"Water level: {raw['level']}\n"
         f"LLM: {llm_state}\n"
-        f"Tickers (dormant): {', '.join(tickers) if tickers else '(none)'}\n"
+        f"Tickers: {tickers_state}\n"
+        f"Watchlist: {', '.join(tickers) if tickers else '(none)'}\n"
         f"Timezone: {config.timezone}",
         parse_mode="HTML",
     )

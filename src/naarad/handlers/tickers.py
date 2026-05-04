@@ -13,6 +13,7 @@ from naarad import db
 from naarad.config import Config
 from naarad.handlers.auth import reject_unauthorized
 from naarad.runtime import is_tickers_enabled, set_tickers_runtime
+from naarad.tickers.eodhd import _classify_symbol
 
 USAGE = (
     "Usage:\n"
@@ -79,6 +80,11 @@ async def ticker_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             return
         symbol = args[1]
         if sub == "add":
+            try:
+                _classify_symbol(symbol)
+            except ValueError as exc:
+                await msg.reply_text(f"⚠️ {exc}")
+                return
             added = db.add_ticker(config.db_path, symbol)
             if added:
                 await msg.reply_text(f"✅ Added {symbol.upper()}")

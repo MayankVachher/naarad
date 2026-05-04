@@ -110,6 +110,42 @@ async def test_remove_unknown(tmp_path: Path) -> None:
     assert "wasn't tracked" in _last_reply(update)
 
 
+@pytest.mark.asyncio
+async def test_add_rejects_unknown_suffix(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    update = make_update()
+
+    await ticker_command(update, make_context(config, args=["add", "FOO.XYZ"]))
+
+    text = _last_reply(update)
+    assert "unsupported exchange suffix" in text
+    # And the symbol must NOT have been persisted.
+    assert "FOO.XYZ" not in db.list_tickers(config.db_path)
+
+
+@pytest.mark.asyncio
+async def test_add_accepts_us_bare(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    update = make_update()
+
+    await ticker_command(update, make_context(config, args=["add", "GOOGL"]))
+
+    assert "GOOGL" in db.list_tickers(config.db_path)
+
+
+@pytest.mark.asyncio
+async def test_add_accepts_to_suffix(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    update = make_update()
+
+    await ticker_command(update, make_context(config, args=["add", "VFV.TO"]))
+
+    assert "VFV.TO" in db.list_tickers(config.db_path)
+
+
 # ---- on/off toggle ----------------------------------------------------------
 
 @pytest.mark.asyncio

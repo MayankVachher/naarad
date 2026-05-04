@@ -8,7 +8,7 @@ A single-user Telegram bot. Runs on a Raspberry Pi (or your laptop):
 
 - 🌅 **Daily brief** at 06:00 — silent send with a `[☀️ Start day]` button. Tapping it greets you and starts the water reminder chain. If you sleep in, an auto-fallback fires at 11:00. The brief itself is rendered by the GitHub Copilot CLI from pre-fetched RSS / weather / sun-times / Wikipedia data (see `src/naarad/brief/`).
 - 💧 **Water reminders** during waking hours, escalating in interval and tone if ignored. Each reminder line is freshly written by Copilot CLI with a hardcoded fallback. Tap the button (or reply, or `/water`) to confirm — the reminder rewrites itself to "✅ Logged at HH:MM".
-- 📈 **Market open / close snapshots** — scaffolded but disabled. Pending migration from EODHD to yfinance.
+- 📈 **Market open / close snapshots** at 09:35 ET and 16:05 ET on weekdays — per-symbol bullet block with price, previous close, change %, and a 🟢/🔴/⚪ status dot. Per-exchange holiday handling (US + TSX); a closed exchange is acknowledged with a single line and its quotes are skipped. `/quote SYMBOL` for on-demand pulls.
 
 ## Architecture
 
@@ -98,14 +98,16 @@ Everything lives in `config.json` (gitignored). See `config.example.json` for th
 |-----|---------|
 | `telegram.token` | BotFather token |
 | `telegram.chat_id` | Your personal chat ID with the bot |
-| `eodhd.api_key` | EODHD API key (unused while market jobs are disabled — keep for now) |
-| `timezone` | IANA timezone for all schedules |
+| `eodhd.api_key` | EODHD API key (real-time quotes + per-exchange holiday calendar) |
+| `timezone` | IANA timezone for water + morning schedules |
 | `water.active_end` | After this, no reminders until next morning |
 | `water.intervals_minutes` | Escalation curve |
 | `brief.location_*` | City / lat / lon for the weather + sunrise lookup |
 | `morning.start_time` | When the daily brief is generated (default 06:00) |
 | `morning.fallback_time` | Auto-start the water chain by this time if you haven't tapped Start (default 11:00) |
-| `tickers_default` | Seed tickers (currently dormant) |
+| `tickers.enabled` | Compile-time floor for the market jobs + /quote (default true) |
+| `tickers.market_timezone` | Timezone the market_open/market_close fire in (default America/New_York) |
+| `tickers_default` | Seed tickers (default `GOOGL, NVDA, VFV.TO, VCN.TO`) |
 | `db_path` | SQLite file path |
 
 ## Commands
@@ -114,10 +116,13 @@ Everything lives in `config.json` (gitignored). See `config.example.json` for th
 |---------|--------------|
 | `/water` | Confirm you drank water (resets the chain) |
 | `/brief` | Re-run today's morning brief on demand (good for prompt iteration) |
-| `/ticker add SYMBOL` | Track a new ticker (dormant until yfinance lands) |
+| `/llm on\|off` | Toggle Copilot-generated brief + water lines at runtime |
+| `/ticker add SYMBOL` | Track a new ticker (US bare or `.TO` suffix; symbol is validated) |
 | `/ticker remove SYMBOL` | Stop tracking |
 | `/ticker list` | List tracked tickers |
-| `/status` | Bot health: day-started, next reminder, last drink, level |
+| `/ticker on\|off` | Runtime kill switch for market jobs + /quote |
+| `/quote SYMBOL` | On-demand real-time quote for a single symbol |
+| `/status` | Bot health: day-started, next reminder, last drink, level, LLM, tickers |
 | `/help` | Command reference |
 
 You can also confirm water by tapping the **💧 Drank water** button on any reminder, or by replying to a reminder with anything.
@@ -130,7 +135,7 @@ uv run pytest
 uv run ruff check src tests
 ```
 
-Tests cover the water state machine, water scheduler integration, DB layer, brief HTML sanitizer, plain renderer, runtime flag, startup validation, and Telegram command handlers (88 tests across `tests/`). Ruff lints + sorts imports + catches common bugs.
+Tests cover the water state machine, water scheduler integration, DB layer, brief HTML sanitizer, plain renderer, runtime flag, startup validation, EODHD client + per-exchange holiday handling, in-process market_open / market_close jobs, and Telegram command handlers (`/water`, `/brief`, `/llm`, `/ticker`, `/quote`, `/status`). Ruff lints + sorts imports + catches common bugs.
 
 ## License
 

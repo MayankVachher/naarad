@@ -23,7 +23,11 @@
   "llm": {
     "enabled": true
   },
-  "tickers_default": ["SPY", "QQQ", "AAPL"],
+  "tickers": {
+    "enabled": true,
+    "market_timezone": "America/New_York"
+  },
+  "tickers_default": ["GOOGL", "NVDA", "VFV.TO", "VCN.TO"],
   "schedules": {
     "market_open": "09:35",
     "market_close": "16:05"
