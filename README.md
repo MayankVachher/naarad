@@ -14,8 +14,6 @@ A single-user Telegram bot. Runs on a Raspberry Pi (or your laptop):
 
 A single long-running bot process. Daily brief + water reminders + the 11:00 fallback are all scheduled in-process via python-telegram-bot's `JobQueue`. SQLite holds state (water chain, day rollover, message ids).
 
-See [`docs/plans/2026-05-02-naarad-design.md`](docs/plans/2026-05-02-naarad-design.md) for the original design (some details have evolved — see `plan.md` in the session for current state).
-
 ## Prerequisites
 
 - Python **3.12+**
