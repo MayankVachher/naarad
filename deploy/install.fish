@@ -34,14 +34,13 @@ uv sync; or fail "uv sync failed."
 # --- 3. Config ------------------------------------------------------------
 bold "3/6 config.json"
 if not test -f config.json
-    cp config.example.json config.json; or fail "could not create config.json"
-    chmod 600 config.json
-    info "created config.json from example"
-    fail "edit config.json (token, chat_id, location, …), then re-run this script."
+    info "no config.json yet — running interactive setup"
+    uv run python deploy/configure.py; or fail "interactive setup failed."
+    test -f config.json; or fail "config.json wasn't created; aborting."
 end
 chmod 600 config.json
 if grep -q PUT_BOTFATHER_TOKEN_HERE config.json
-    fail "config.json still has the placeholder token. Edit it before continuing."
+    fail "config.json still has the placeholder token. Run 'uv run python deploy/configure.py' or edit it by hand."
 end
 info "present and chmod 600"
 

@@ -24,59 +24,61 @@ Optional:
 - The **GitHub Copilot CLI** (`copilot`) on `PATH`, signed in. When present, the brief and water reminders are written by the LLM; without it the brief renders deterministically from the same RSS / weather / sun / Wikipedia data, and water reminders use a hardcoded escalating tone table. Set `config.llm.enabled: false` to permanently disable LLM features even if `copilot` is installed. Override the binary path via the `COPILOT_BIN` env var if it isn't on `PATH`.
 - An **EODHD API key** for `/quote` and the market open/close briefs. Without it those features stay dormant; the rest of the bot is unaffected (see `/status` for the off-reason).
 
-## Setup
+## Setup (local dev)
 
 ```bash
-# 1. Clone
 git clone <repo> naarad
 cd naarad
-
-# 2. Install deps with uv
 uv sync
-
-# 3. Create config (treat as a secret)
-cp config.example.json config.json
-chmod 600 config.json
-$EDITOR config.json   # fill in token + chat_id
-
-# 4. Run
+uv run python deploy/configure.py   # interactive: token + chat_id + EODHD
 uv run python -m naarad.bot
 ```
 
-For Pi deployment with systemd, see the [Deploy on a Raspberry Pi](#deploy-on-a-raspberry-pi) section below.
+For Pi deployment, see [Deploy on a Raspberry Pi](#deploy-on-a-raspberry-pi).
 
 ## Deploy on a Raspberry Pi
 
-These steps assume a fresh Raspberry Pi OS install on a Pi 4 or 5, the Pi already on your network, and a Telegram bot already created via BotFather.
+Fresh Raspberry Pi OS, Pi already on your network, Telegram bot already created via BotFather.
 
 ```bash
-# 1. Install uv (https://docs.astral.sh/uv/getting-started/installation/)
+git clone <repo> ~/naarad
+cd ~/naarad
+./deploy/install.sh        # or ./deploy/install.fish if you use fish
+```
+
+The script is idempotent — re-run after editing config or pulling updates. It will:
+
+1. install `uv` if missing
+2. `uv sync`
+3. run `deploy/configure.py` if there's no `config.json` yet — it asks for the BotFather token, auto-detects your `chat_id` by polling Telegram for a message you send to the bot, and (optionally) takes an EODHD key. Other fields (timezone, location, schedules) default to Toronto; edit `config.json` afterwards if you live elsewhere.
+4. smoke-test the bot (looks for "startup validation passed")
+5. `sed` the systemd unit template into `/etc/systemd/system/naarad.service`, then `daemon-reload` + `enable` + `restart`
+6. print status + log paths
+
+**Optional:** install the [GitHub Copilot CLI](https://docs.github.com/en/copilot) and `copilot auth login` *before* running the script if you want LLM-written briefs and water reminders. The script doesn't auto-install it. Without Copilot, the bot uses the deterministic plain renderer and hardcoded reminder tones.
+
+Logs go to **two places** by design: journald (`journalctl -u naarad`) and `logs/naarad.log` (rotating, 5 MB × 3) inside the install directory.
+
+To pull updates: `git pull && uv sync && sudo systemctl restart naarad`.
+
+<details>
+<summary>Manual install (no script)</summary>
+
+```bash
+# 1. uv
 curl -LsSf https://astral.sh/uv/install.sh | sh
 source ~/.bashrc
 
-# 2. (Optional) Install + sign in to the GitHub Copilot CLI to get
-#    LLM-written briefs and water reminders. Skip this step if you're
-#    happy with the deterministic plain renderer + hardcoded reminder
-#    tones. On a Pi the typical install is:
-#       sudo apt install -y nodejs npm
-#       npm install -g @githubnext/github-copilot-cli   # or current package
-#    Then sign in with `copilot auth login`. Override the binary path via
-#    COPILOT_BIN if it isn't on PATH.
-
-# 3. Clone + setup
-git clone <repo> ~/naarad
-cd ~/naarad
+# 2. Deps + config
 uv sync
 cp config.example.json config.json
 chmod 600 config.json
 $EDITOR config.json   # token, chat_id, location, etc.
 
-# 4. Smoke-test (you should see "startup validation passed" within a second)
+# 3. Smoke-test (expect "startup validation passed" within a second; Ctrl-C)
 uv run python -m naarad.bot
-# Ctrl-C once you see the bot is happy.
 
-# 5. Install the systemd service (substitute placeholders for your user
-#    + install path).
+# 4. systemd unit
 sed \
   -e "s|@USER@|$USER|g" \
   -e "s|@HOME@|$HOME|g" \
@@ -84,16 +86,8 @@ sed \
   deploy/naarad.service.template | sudo tee /etc/systemd/system/naarad.service > /dev/null
 sudo systemctl daemon-reload
 sudo systemctl enable --now naarad
-
-# 6. Check status + logs
-systemctl status naarad
-journalctl -u naarad -f              # live tail
-tail -f ~/naarad/logs/naarad.log     # the rotating file logger's output
 ```
-
-Logs go to **two places** by design: journald (via systemd, available through `journalctl -u naarad`) and `logs/naarad.log` (rotating, 5 MB × 3 backups) inside the install directory. Pick whichever is more convenient for the question you're asking.
-
-To pull updates: `cd ~/naarad && git pull && uv sync && sudo systemctl restart naarad`.
+</details>
 
 ## Configuration
 
