@@ -38,11 +38,13 @@ def _start_day_keyboard() -> dict:
 
 
 def run_brief() -> int:
-    """Build, send, and persist today's brief. Safe to call from any process.
+    """Build, send, and persist today's brief.
 
     Idempotent within a day — if ``last_brief_on`` already records today,
-    skip. Protects against the catch-up and scheduled jobs both firing on
-    a near-start_time boot.
+    skip. The check-then-write is not atomic at the SQL level, so this
+    relies on the bot being single-process: the catch-up job and the
+    daily-scheduled job run sequentially on the asyncio event loop, never
+    concurrently.
     """
     config = load_config()
     today = datetime.now(config.tz).date()

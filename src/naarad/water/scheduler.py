@@ -158,11 +158,9 @@ async def run_loop(app: Application) -> None:
             state = _state_from_db(config)
             action = next_action(state, _now(config.tz), wcfg)
             if not isinstance(action, Reminder) or action.level != level:
-                # State drifted while we were rendering — possibilities:
-                #   - user confirmed → next_action is Sleep or Idle
-                #   - active window ended → Idle
-                #   - level was bumped by a concurrent reminder send → level mismatch
-                # In every case discard the rendered text and let the next
+                # State drifted while we were rendering — either the user
+                # confirmed (next_action returns Sleep) or the active window
+                # ended (Idle). Discard the rendered text and let the next
                 # loop iteration handle whatever the new state wants.
                 continue
 

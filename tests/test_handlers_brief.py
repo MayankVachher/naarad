@@ -90,6 +90,7 @@ async def test_brief_falls_back_to_new_message_when_edit_fails(
     tmp_path: Path, monkeypatch
 ) -> None:
     config = make_config(tmp_path)
+    db.init_db(config.db_path)
     update, ack = make_update()
     ack.edit_text = AsyncMock(side_effect=RuntimeError("can't edit"))
 
@@ -102,6 +103,10 @@ async def test_brief_falls_back_to_new_message_when_edit_fails(
 
     # Two reply_text awaits: once for the ack, once for the fallback send.
     assert update.message.reply_text.await_count == 2
+    # The fallback path must still set the marker so the morning catch-up
+    # doesn't fire a redundant brief later.
+    today_iso = datetime.now(config.tz).date().isoformat()
+    assert db.get_setting(config.db_path, LAST_BRIEF_SETTING) == today_iso
 
 
 @pytest.mark.asyncio
