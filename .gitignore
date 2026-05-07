@@ -8,6 +8,7 @@ wheels/
 
 # Virtual environments
 .venv
+.venv-*
 
 # Secrets — config.json holds tokens, API keys, chat_id
 config.json

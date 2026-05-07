@@ -6,7 +6,7 @@
 
 A single-user Telegram bot. Runs on a Raspberry Pi (or your laptop):
 
-- 🌅 **Daily brief** at 06:00 — silent send with a `[☀️ Start day]` button. Tapping it greets you and starts the water reminder chain. If you sleep in, an auto-fallback fires at 11:00. The brief itself is rendered by the GitHub Copilot CLI from pre-fetched RSS / weather / sun-times / Wikipedia data (see `src/naarad/brief/`).
+- 🌅 **Daily brief** at 06:00 — silent send with a `[☀️ Start day]` button. Tapping it greets you and starts the water reminder chain. If you sleep in, an auto-fallback fires at 11:00. If the bot was offline at 06:00, a catch-up brief fires shortly after the next boot. The brief itself is rendered by the GitHub Copilot CLI from pre-fetched RSS / weather / sun-times / Wikipedia data (see `src/naarad/brief/`).
 - 💧 **Water reminders** during waking hours, escalating in interval and tone if ignored. Each reminder line is freshly written by Copilot CLI with a hardcoded fallback. Tap the button (or reply, or `/water`) to confirm — the reminder rewrites itself to "✅ Logged at HH:MM".
 - 📈 **Market open / close snapshots** at 09:35 ET and 16:05 ET on weekdays — per-symbol bullet block with price, previous close, change %, and a 🟢/🔴/⚪ status dot. Per-exchange holiday handling (US + TSX); a closed exchange is acknowledged with a single line and its quotes are skipped. `/quote SYMBOL` for on-demand pulls.
 
