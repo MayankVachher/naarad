@@ -18,7 +18,11 @@ A single long-running bot process. Daily brief + water reminders + the 11:00 fal
 
 - Python **3.12+**
 - [`uv`](https://github.com/astral-sh/uv) for dependency management
-- The **GitHub Copilot CLI** (`copilot`) on `PATH`, signed in. Used by the brief and water reminder generators. Override the binary path via `COPILOT_BIN` env var if it isn't on `PATH`.
+
+Optional:
+
+- The **GitHub Copilot CLI** (`copilot`) on `PATH`, signed in. When present, the brief and water reminders are written by the LLM; without it the brief renders deterministically from the same RSS / weather / sun / Wikipedia data, and water reminders use a hardcoded escalating tone table. Set `config.llm.enabled: false` to permanently disable LLM features even if `copilot` is installed. Override the binary path via the `COPILOT_BIN` env var if it isn't on `PATH`.
+- An **EODHD API key** for `/quote` and the market open/close briefs. Without it those features stay dormant; the rest of the bot is unaffected (see `/status` for the off-reason).
 
 ## Setup
 
@@ -50,9 +54,10 @@ These steps assume a fresh Raspberry Pi OS install on a Pi 4 or 5, the Pi alread
 curl -LsSf https://astral.sh/uv/install.sh | sh
 source ~/.bashrc
 
-# 2. Install + sign in to the GitHub Copilot CLI (the brief and reminder
-#    generators shell out to `copilot`). Follow the official install guide
-#    for your platform; on a Pi you'll typically use the npm install:
+# 2. (Optional) Install + sign in to the GitHub Copilot CLI to get
+#    LLM-written briefs and water reminders. Skip this step if you're
+#    happy with the deterministic plain renderer + hardcoded reminder
+#    tones. On a Pi the typical install is:
 #       sudo apt install -y nodejs npm
 #       npm install -g @githubnext/github-copilot-cli   # or current package
 #    Then sign in with `copilot auth login`. Override the binary path via
