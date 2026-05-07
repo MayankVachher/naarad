@@ -16,11 +16,27 @@ from datetime import datetime
 from telegram import Update
 from telegram.ext import ContextTypes
 
+from naarad import db
 from naarad.brief.copilot import get_daily_brief
 from naarad.config import Config
 from naarad.handlers.auth import reject_unauthorized
+from naarad.jobs.daily_brief import LAST_BRIEF_SETTING
 
 log = logging.getLogger(__name__)
+
+
+def _record_brief_sent(config: Config, today_iso: str) -> None:
+    """Mark today as having had a successful brief send. Best-effort —
+    logged-and-swallowed because the user-visible brief already succeeded.
+
+    /brief is documented as side-effect free, but this single setting is
+    intentional: it lets the morning catch-up job see "a brief went out
+    today" and skip the scheduled redundant send.
+    """
+    try:
+        db.set_setting(config.db_path, LAST_BRIEF_SETTING, today_iso)
+    except Exception:
+        log.exception("failed to persist last_brief_on from /brief")
 
 
 async def brief_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -49,3 +65,5 @@ async def brief_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     except Exception:
         log.exception("/brief edit_text failed; sending as a new message")
         await update.message.reply_text(body, parse_mode="HTML")
+
+    _record_brief_sent(config, today.isoformat())

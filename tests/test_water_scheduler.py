@@ -343,8 +343,10 @@ async def test_confirm_during_render_discards_rendered_line(
 
     # No reminder lines went out — the rendered text was discarded because
     # the recheck saw last_drink_at advanced by the confirm.
-    reminders = [m for m in app.bot.sent if "should-not-be-sent" in m["text"]]
-    assert reminders == []
+    assert "should-not-be-sent" not in [m["text"] for m in app.bot.sent]
+    # And the inner run_loop triggered by confirm_drink must not have sent
+    # anything either (post-confirm, next_action is Sleep, not Reminder).
+    assert app.bot.sent == []
     # State reflects the confirm.
     state = db.get_water_state(cfg.db_path)
     assert state["last_drink_at"] == datetime(2026, 5, 2, 12, 0, tzinfo=TZ)

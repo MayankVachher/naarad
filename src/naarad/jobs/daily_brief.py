@@ -38,9 +38,19 @@ def _start_day_keyboard() -> dict:
 
 
 def run_brief() -> int:
-    """Build, send, and persist today's brief. Safe to call from any process."""
+    """Build, send, and persist today's brief. Safe to call from any process.
+
+    Idempotent within a day — if ``last_brief_on`` already records today,
+    skip. Protects against the catch-up and scheduled jobs both firing on
+    a near-start_time boot.
+    """
     config = load_config()
     today = datetime.now(config.tz).date()
+
+    last = db.get_setting(config.db_path, LAST_BRIEF_SETTING)
+    if last == today.isoformat():
+        log.info("daily brief already sent today (last=%s); skipping", last)
+        return 0
 
     body = get_daily_brief(today, config)
 

@@ -1,12 +1,14 @@
 """Tests for /brief command handler — ack + thread + edit pattern."""
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
+from naarad import db
 from naarad.config import (
     BriefConfig,
     Config,
@@ -17,6 +19,7 @@ from naarad.config import (
     WaterConfig,
 )
 from naarad.handlers import brief as brief_handlers
+from naarad.jobs.daily_brief import LAST_BRIEF_SETTING
 
 
 def make_config(tmp_path: Path) -> Config:
@@ -99,6 +102,28 @@ async def test_brief_falls_back_to_new_message_when_edit_fails(
 
     # Two reply_text awaits: once for the ack, once for the fallback send.
     assert update.message.reply_text.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_brief_records_last_brief_marker_on_success(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A successful /brief must set last_brief_on so the morning catch-up
+    doesn't fire a redundant scheduled brief later that day.
+    """
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    update, ack = make_update()
+
+    monkeypatch.setattr(
+        brief_handlers, "get_daily_brief",
+        lambda today, config: "<b>Body</b>",
+    )
+
+    await brief_handlers.brief_command(update, make_context(config))
+
+    today_iso = datetime.now(config.tz).date().isoformat()
+    assert db.get_setting(config.db_path, LAST_BRIEF_SETTING) == today_iso
 
 
 @pytest.mark.asyncio

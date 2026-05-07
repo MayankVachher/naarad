@@ -74,10 +74,10 @@ def _transaction(conn: sqlite3.Connection) -> Iterator[None]:
     conn.execute("BEGIN IMMEDIATE")
     try:
         yield
+        conn.execute("COMMIT")
     except Exception:
         conn.execute("ROLLBACK")
         raise
-    conn.execute("COMMIT")
 
 
 def init_db(db_path: str | Path, seed_tickers: list[str] | None = None) -> None:
