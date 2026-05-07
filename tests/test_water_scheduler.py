@@ -309,3 +309,43 @@ async def test_after_active_end_is_idle(app, freeze_now):
     await water_scheduler.kickoff(app)
     assert app.bot.sent == []
     assert app.job_queue.scheduled == []
+
+
+# ---------- Lock-drop semantics around render ----------
+
+@pytest.mark.asyncio
+async def test_confirm_during_render_discards_rendered_line(
+    app, freeze_now, monkeypatch
+):
+    """If the user confirms while text is being rendered (lock released),
+    the rendered line is discarded — no spurious reminder is sent and the
+    confirm's anchor wins.
+    """
+    cfg = app.bot_data["config"]
+    db.update_water_state(
+        cfg.db_path,
+        day_started_on=date(2026, 5, 2),
+        last_drink_at=datetime(2026, 5, 2, 10, 0, tzinfo=TZ),
+        level=0,
+    )
+    freeze_now["now"] = datetime(2026, 5, 2, 12, 0, tzinfo=TZ)  # reminder due
+
+    # Simulate a slow render that confirms-mid-flight: when the renderer is
+    # called, slip in a confirm before it returns.
+    async def _slow_render(config, level):
+        await water_scheduler.confirm_drink(app)
+        return "💧 should-not-be-sent"
+
+    monkeypatch.setattr(water_scheduler, "_render_reminder_text", _slow_render)
+
+    app.bot.sent.clear()
+    await water_scheduler.run_loop(app)
+
+    # No reminder lines went out — the rendered text was discarded because
+    # the recheck saw last_drink_at advanced by the confirm.
+    reminders = [m for m in app.bot.sent if "should-not-be-sent" in m["text"]]
+    assert reminders == []
+    # State reflects the confirm.
+    state = db.get_water_state(cfg.db_path)
+    assert state["last_drink_at"] == datetime(2026, 5, 2, 12, 0, tzinfo=TZ)
+    assert state["level"] == 0

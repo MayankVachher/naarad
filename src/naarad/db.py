@@ -62,8 +62,32 @@ def connect(db_path: str | Path) -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
+@contextmanager
+def _transaction(conn: sqlite3.Connection) -> Iterator[None]:
+    """Explicit transaction on an autocommit connection.
+
+    We run with ``isolation_level=None`` so each statement is normally
+    autocommitted. Multi-statement work that must be atomic (the migrations
+    in init_db) wraps itself in this manager so a crash mid-init can't
+    leave half-applied schema state.
+    """
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        yield
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+    conn.execute("COMMIT")
+
+
 def init_db(db_path: str | Path, seed_tickers: list[str] | None = None) -> None:
-    """Create tables if missing, run migrations, seed tickers on first run."""
+    """Create tables if missing, run migrations, seed tickers on first run.
+
+    Each migration step runs inside an explicit transaction so a crash
+    mid-init can't leave the DB with tables created but the schema_version
+    row missing (which would re-trigger the v0 path on next boot and
+    double-seed or double-create).
+    """
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     with connect(db_path) as conn:
         conn.execute(
@@ -74,67 +98,79 @@ def init_db(db_path: str | Path, seed_tickers: list[str] | None = None) -> None:
         current = row["version"] if row else 0
 
         if current == 0:
-            conn.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS tickers (
-                    symbol     TEXT PRIMARY KEY,
-                    added_at   TEXT NOT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS water_state (
-                    id                       INTEGER PRIMARY KEY CHECK (id = 1),
-                    last_drink_at            TEXT,
-                    last_reminder_at         TEXT,
-                    level                    INTEGER NOT NULL DEFAULT 0,
-                    last_msg_id              INTEGER,
-                    day_started_on           TEXT,
-                    start_button_message_id  INTEGER
-                );
-
-                CREATE TABLE IF NOT EXISTS settings (
-                    key   TEXT PRIMARY KEY,
-                    value TEXT
-                );
-
-                INSERT OR IGNORE INTO water_state (id, level) VALUES (1, 0);
-                """
-            )
-            conn.execute(
-                "INSERT INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,)
-            )
+            with _transaction(conn):
+                # executescript would auto-commit our BEGIN; emit individual
+                # CREATEs instead so the whole init is one atomic unit.
+                conn.execute(
+                    "CREATE TABLE IF NOT EXISTS tickers ("
+                    "  symbol     TEXT PRIMARY KEY,"
+                    "  added_at   TEXT NOT NULL"
+                    ")"
+                )
+                conn.execute(
+                    "CREATE TABLE IF NOT EXISTS water_state ("
+                    "  id                       INTEGER PRIMARY KEY CHECK (id = 1),"
+                    "  last_drink_at            TEXT,"
+                    "  last_reminder_at         TEXT,"
+                    "  level                    INTEGER NOT NULL DEFAULT 0,"
+                    "  last_msg_id              INTEGER,"
+                    "  day_started_on           TEXT,"
+                    "  start_button_message_id  INTEGER"
+                    ")"
+                )
+                conn.execute(
+                    "CREATE TABLE IF NOT EXISTS settings ("
+                    "  key   TEXT PRIMARY KEY,"
+                    "  value TEXT"
+                    ")"
+                )
+                conn.execute(
+                    "INSERT OR IGNORE INTO water_state (id, level) VALUES (1, 0)"
+                )
+                conn.execute(
+                    "INSERT INTO schema_version (version) VALUES (?)",
+                    (SCHEMA_VERSION,),
+                )
             current = SCHEMA_VERSION
 
         if current < 2:
             # v1 -> v2: add day_started_on and start_button_message_id columns.
-            cols = {r["name"] for r in conn.execute("PRAGMA table_info(water_state)")}
-            if "day_started_on" not in cols:
-                conn.execute("ALTER TABLE water_state ADD COLUMN day_started_on TEXT")
-            if "start_button_message_id" not in cols:
-                conn.execute(
-                    "ALTER TABLE water_state ADD COLUMN start_button_message_id INTEGER"
-                )
-            conn.execute("UPDATE schema_version SET version = ?", (2,))
+            with _transaction(conn):
+                cols = {
+                    r["name"] for r in conn.execute("PRAGMA table_info(water_state)")
+                }
+                if "day_started_on" not in cols:
+                    conn.execute(
+                        "ALTER TABLE water_state ADD COLUMN day_started_on TEXT"
+                    )
+                if "start_button_message_id" not in cols:
+                    conn.execute(
+                        "ALTER TABLE water_state ADD COLUMN start_button_message_id INTEGER"
+                    )
+                conn.execute("UPDATE schema_version SET version = ?", (2,))
             current = 2
 
         if current < 3:
             # v2 -> v3: add settings key-value table for runtime flags.
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS settings ("
-                "  key   TEXT PRIMARY KEY,"
-                "  value TEXT"
-                ")"
-            )
-            conn.execute("UPDATE schema_version SET version = ?", (3,))
+            with _transaction(conn):
+                conn.execute(
+                    "CREATE TABLE IF NOT EXISTS settings ("
+                    "  key   TEXT PRIMARY KEY,"
+                    "  value TEXT"
+                    ")"
+                )
+                conn.execute("UPDATE schema_version SET version = ?", (3,))
             current = 3
 
         if seed_tickers:
             existing = {r["symbol"] for r in conn.execute("SELECT symbol FROM tickers")}
             if not existing:
-                now_iso = datetime.now().astimezone().isoformat()
-                conn.executemany(
-                    "INSERT INTO tickers (symbol, added_at) VALUES (?, ?)",
-                    [(s.upper(), now_iso) for s in seed_tickers],
-                )
+                with _transaction(conn):
+                    now_iso = datetime.now().astimezone().isoformat()
+                    conn.executemany(
+                        "INSERT INTO tickers (symbol, added_at) VALUES (?, ?)",
+                        [(s.upper(), now_iso) for s in seed_tickers],
+                    )
 
 
 # ---------- Tickers ----------

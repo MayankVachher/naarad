@@ -25,6 +25,7 @@ from naarad.water import scheduler as water_scheduler
 log = logging.getLogger(__name__)
 
 BRIEF_JOB_NAME = "daily-brief"
+BRIEF_CATCHUP_NAME = "daily-brief-catchup"
 FALLBACK_JOB_NAME = "morning-fallback"
 FALLBACK_CATCHUP_NAME = "morning-fallback-catchup"
 
@@ -98,9 +99,29 @@ async def kickoff(app: Application) -> None:
     jq.run_daily(_fallback_callback, time=fallback_t, name=FALLBACK_JOB_NAME)
     log.info("scheduled daily morning fallback at %s", fallback_t.isoformat())
 
-    # Catch-up: bot started after fallback time, day not yet started.
     now = datetime.now(config.tz)
     today = now.date()
+
+    # Brief catch-up: bot started after start_time today and the scheduled
+    # brief never fired. Symmetric with the fallback catch-up below — closes
+    # the "Pi was off at 06:00, came up at 07:00" silent-degradation case.
+    today_brief = datetime.combine(today, config.morning.start_time_t, tzinfo=config.tz)
+    # Imported lazily to avoid pulling telegram_api when this module is
+    # loaded by tests that don't exercise the brief.
+    from naarad.jobs.daily_brief import LAST_BRIEF_SETTING
+    last_brief_on = db.get_setting(config.db_path, LAST_BRIEF_SETTING)
+    brief_sent_today = last_brief_on == today.isoformat()
+    if now >= today_brief and not brief_sent_today:
+        log.info("running daily brief catch-up (now %s past %s)", now, today_brief)
+        for job in jq.get_jobs_by_name(BRIEF_CATCHUP_NAME):
+            job.schedule_removal()
+        jq.run_once(
+            _brief_callback,
+            when=timedelta(seconds=3),
+            name=BRIEF_CATCHUP_NAME,
+        )
+
+    # Fallback catch-up: bot started after fallback time, day not yet started.
     today_fallback = datetime.combine(today, config.morning.fallback_time_t, tzinfo=config.tz)
     if now >= today_fallback and not db.is_day_started(config.db_path, today):
         log.info("running morning fallback catch-up (now %s past %s)", now, today_fallback)

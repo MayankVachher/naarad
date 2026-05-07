@@ -22,6 +22,12 @@ from naarad.telegram_api import send_message
 
 log = logging.getLogger(__name__)
 
+# Marker that today's scheduled brief sent successfully. Read by
+# morning.scheduler.kickoff to decide whether to fire a catch-up after a
+# late boot. Persisted in the settings k-v table so we don't need a schema
+# migration for a single date string.
+LAST_BRIEF_SETTING = "last_brief_on"
+
 
 def _start_day_keyboard() -> dict:
     return {
@@ -56,6 +62,10 @@ def run_brief() -> int:
             db.update_water_state(config.db_path, start_button_message_id=msg_id)
         except Exception:
             log.exception("failed to persist start_button_message_id")
+    try:
+        db.set_setting(config.db_path, LAST_BRIEF_SETTING, today.isoformat())
+    except Exception:
+        log.exception("failed to persist last_brief_on marker")
     return 0
 
 

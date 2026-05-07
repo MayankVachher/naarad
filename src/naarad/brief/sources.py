@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import date
 from zoneinfo import ZoneInfo
@@ -140,10 +141,27 @@ def _fetch_feed(url: str, source: str, max_items: int = MAX_PER_FEED) -> list[He
 
 
 def _fetch_feeds(feeds: Iterable[tuple[str, str]], max_per_feed: int = MAX_PER_FEED) -> list[Headline]:
+    """Fan out feed fetches in parallel — each is purely I/O bound, so a
+    small thread pool collapses the worst-case latency from N×timeout to
+    ~timeout. Per-feed order in the output matches the input order so the
+    dedupe behavior is unchanged.
+    """
+    feed_list = list(feeds)
+    if not feed_list:
+        return []
+
+    with ThreadPoolExecutor(max_workers=min(8, len(feed_list))) as ex:
+        batches = list(
+            ex.map(
+                lambda sf: _fetch_feed(sf[1], sf[0], max_per_feed),
+                feed_list,
+            )
+        )
+
     out: list[Headline] = []
     seen_titles: set[str] = set()
-    for source, url in feeds:
-        for h in _fetch_feed(url, source, max_per_feed):
+    for batch in batches:
+        for h in batch:
             key = h.title.lower()[:80]
             if key in seen_titles:
                 continue
