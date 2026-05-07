@@ -151,14 +151,19 @@ def _write_chmod600(path: Path, content: str) -> None:
 
     ``Path.write_text`` would create the file using the process umask
     (usually 0644) and only later tighten via chmod, leaving a window
-    where a Telegram bot token sits world-readable on disk. Instead we
-    write to a tempfile in the same dir, chmod it, and ``os.replace``
-    it into place.
+    where a Telegram bot token sits world-readable on disk.
+    ``tempfile.mkstemp`` creates the tempfile already mode 0600 (per its
+    docs: readable/writable only by the creating user), and
+    ``os.replace`` is atomic and preserves the source inode's mode, so
+    the destination is never world-readable on creation or overwrite.
     """
     fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=".configtmp.")
     tmp_path = Path(tmp_name)
+    # ``fdopen`` takes ownership of fd and closes it on context exit,
+    # whether or not the body raises. Doing this before any other
+    # operation prevents the fd from leaking if something between
+    # mkstemp and fdopen failed.
     try:
-        os.chmod(tmp_path, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(content)
         os.replace(tmp_path, path)
