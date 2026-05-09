@@ -3,15 +3,19 @@
 
 Run via:  uv run python deploy/configure.py
 
-Prompts for the few things that can't be sensibly defaulted:
+Prompts for:
   - Telegram bot token (from BotFather)
   - Telegram chat_id — auto-detected by polling getUpdates after you
-    send a message to the bot
+    send a message to the bot (skipped if re-config keeps existing)
   - EODHD API key (optional)
+  - Timezone (defaults to /etc/timezone if available, else America/Toronto)
 
-Everything else (timezone, location, schedules, water intervals…) is
-seeded from config.example.json; edit config.json by hand afterwards
-if you live somewhere other than Toronto.
+Re-running against an existing config.json offers each value as the
+default — press Enter to keep, type to replace.
+
+Other fields (location lat/lon, schedules, water intervals) stay at
+their existing values; edit config.json by hand if you need to change
+them.
 """
 from __future__ import annotations
 
@@ -22,6 +26,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 
@@ -48,12 +53,55 @@ def prompt(label: str, default: str | None = None, required: bool = True) -> str
         print("  (required)")
 
 
-def prompt_token() -> str:
+def prompt_token(existing: str | None = None) -> str:
+    """Prompt for a BotFather token. If ``existing`` is a valid token,
+    show it as the default so re-config can press Enter to keep.
+    """
+    default = existing if (existing and TOKEN_RE.match(existing)) else None
     while True:
-        token = prompt("Telegram bot token (from BotFather)")
+        token = prompt("Telegram bot token (from BotFather)", default=default)
         if TOKEN_RE.match(token):
             return token
         print("  ✗ Token doesn't match expected shape (digits:secret).")
+
+
+def _is_placeholder(value: str) -> bool:
+    """True if ``value`` is empty or one of the example.json placeholders."""
+    return not value or "PUT_" in value
+
+
+def _detect_timezone() -> str | None:
+    """Best-effort read of the system timezone (Debian/Ubuntu/Pi OS).
+
+    Returns None if the file isn't there or its contents don't load as a
+    valid IANA name.
+    """
+    try:
+        candidate = Path("/etc/timezone").read_text().strip()
+    except OSError:
+        return None
+    if not candidate:
+        return None
+    try:
+        ZoneInfo(candidate)
+    except ZoneInfoNotFoundError:
+        return None
+    return candidate
+
+
+def prompt_timezone(existing: str | None = None) -> str:
+    """Prompt for an IANA timezone, validated via ZoneInfo. Order of
+    defaults: existing config value > /etc/timezone > America/Toronto.
+    """
+    default = existing or _detect_timezone() or "America/Toronto"
+    while True:
+        value = prompt("Timezone (IANA, e.g. America/Toronto)", default=default)
+        try:
+            ZoneInfo(value)
+        except ZoneInfoNotFoundError:
+            print(f"  ✗ Unknown timezone {value!r}. Use an IANA name.")
+            continue
+        return value
 
 
 # Update keys that carry a "chat" object whose id we should consider.
@@ -177,34 +225,61 @@ def main() -> int:
     if not EXAMPLE.exists():
         sys.exit(f"  ✗ {EXAMPLE} missing — run from the repo root.")
 
-    if CONFIG.exists():
-        ans = prompt("config.json already exists. Overwrite?", default="n").lower()
+    # Use existing config.json as the source of defaults if present, so
+    # a re-run can keep values by pressing Enter. Fall back to the
+    # example for first-time setup.
+    is_reconfig = CONFIG.exists()
+    if is_reconfig:
+        ans = prompt("config.json already exists. Reconfigure?", default="n").lower()
         if ans not in ("y", "yes"):
             print("Aborted; existing config.json untouched.")
             return 0
+        base = json.loads(CONFIG.read_text())
+        print("Re-configuring — press Enter at any prompt to keep the existing value.\n")
+    else:
+        base = json.loads(EXAMPLE.read_text())
+        print("Bootstrapping config.json. Location lat/lon stays at the example")
+        print("values (Toronto); edit config.json afterwards if you live elsewhere.\n")
 
-    base = json.loads(EXAMPLE.read_text())
-
-    print("Bootstrapping config.json. Other fields default to Toronto;")
-    print("edit config.json by hand afterwards if you live elsewhere.\n")
-
-    token = prompt_token()
+    existing_token = base.get("telegram", {}).get("token", "")
+    token = prompt_token(existing=existing_token)
     base["telegram"]["token"] = token
 
-    chat_id = fetch_chat_id(token)
-    print(f"  ✓ chat_id = {chat_id}")
+    existing_chat_id = base.get("telegram", {}).get("chat_id") or 0
+    if is_reconfig and existing_chat_id and token == existing_token:
+        # Same token + a real chat_id already set — offer to keep without
+        # round-tripping to Telegram. If the token changed, the existing
+        # chat_id may not be valid for this bot, so re-detect.
+        ans = prompt(
+            f"Existing chat_id is {existing_chat_id}. Keep it?", default="y"
+        ).lower()
+        if ans in ("y", "yes"):
+            chat_id: int = existing_chat_id
+        else:
+            chat_id = fetch_chat_id(token)
+            print(f"  ✓ chat_id = {chat_id}")
+    else:
+        chat_id = fetch_chat_id(token)
+        print(f"  ✓ chat_id = {chat_id}")
     base["telegram"]["chat_id"] = chat_id
 
     print()
+    existing_eodhd = base.get("eodhd", {}).get("api_key", "")
+    eodhd_default = None if _is_placeholder(existing_eodhd) else existing_eodhd
     eodhd = prompt(
         "EODHD API key (optional — enables /quote + market briefs; Enter to skip)",
+        default=eodhd_default,
         required=False,
     )
     base["eodhd"]["api_key"] = eodhd
 
+    print()
+    existing_tz = base.get("timezone")
+    base["timezone"] = prompt_timezone(existing=existing_tz)
+
     _write_chmod600(CONFIG, json.dumps(base, indent=2) + "\n")
     print(f"\n✓ Wrote {CONFIG} (chmod 600)")
-    print("  Edit later to change timezone, location, schedules, or water intervals.")
+    print("  Edit later to change location lat/lon, schedules, or water intervals.")
     return 0
 
 

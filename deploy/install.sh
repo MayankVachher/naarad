@@ -1,9 +1,9 @@
-#!/bin/sh
+#!/bin/bash
 # Naarad installer for systemd-based Linux (e.g. Raspberry Pi OS).
 # Idempotent — safe to re-run after editing config or pulling updates.
 # Must be run from the repo root.
 
-set -eu
+set -euo pipefail
 
 INSTALL_DIR="$(pwd)"
 SERVICE_PATH="/etc/systemd/system/naarad.service"

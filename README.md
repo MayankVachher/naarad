@@ -50,7 +50,7 @@ The script is idempotent — re-run after editing config or pulling updates. It 
 
 1. install `uv` if missing
 2. `uv sync`
-3. run `deploy/configure.py` if there's no `config.json` yet — it asks for the BotFather token, auto-detects your `chat_id` by polling Telegram for a message you send to the bot, and (optionally) takes an EODHD key. Other fields (timezone, location, schedules) default to Toronto; edit `config.json` afterwards if you live elsewhere.
+3. run `deploy/configure.py` if there's no `config.json` yet — it asks for the BotFather token, auto-detects your `chat_id` by polling Telegram for a message you send to the bot, takes an optional EODHD key, and prompts for timezone (defaulting to `/etc/timezone` if available). Re-run it later with `uv run python deploy/configure.py` to change any of these — existing values appear as defaults so Enter keeps them. Location lat/lon stays at the example values; edit `config.json` afterwards if you live outside Toronto.
 4. smoke-test the bot (looks for "startup validation passed")
 5. `sed` the systemd unit template into `/etc/systemd/system/naarad.service`, then `daemon-reload` + `enable` + `restart`
 6. print status + log paths
@@ -60,6 +60,8 @@ The script is idempotent — re-run after editing config or pulling updates. It 
 Logs go to **two places** by design: journald (`journalctl -u naarad`) and `logs/naarad.log` (rotating, 5 MB × 3) inside the install directory.
 
 To pull updates: `git pull && uv sync && sudo systemctl restart naarad`.
+
+To remove: `./deploy/uninstall.sh` (or `./deploy/uninstall.fish`) — stops, disables, and removes the systemd unit. Repo, config, DB, and logs are left in place.
 
 <details>
 <summary>Manual install (no script)</summary>
