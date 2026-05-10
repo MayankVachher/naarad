@@ -6,9 +6,11 @@ dist/
 wheels/
 *.egg-info
 
-# Virtual environments
+# Virtual environments + uv cache (the systemd unit redirects uv's cache
+# into the install dir to keep its sandbox tight; we don't want it tracked).
 .venv
 .venv-*
+.uv-cache/
 
 # Secrets — config.json holds tokens, API keys, chat_id
 config.json

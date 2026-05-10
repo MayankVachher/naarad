@@ -14,6 +14,10 @@ Group=@USER@
 WorkingDirectory=@INSTALL_DIR@
 # uv must be on PATH; if installed under ~/.local/bin, this works:
 Environment=PATH=@HOME@/.local/bin:/usr/local/bin:/usr/bin:/bin
+# Redirect uv's cache to the install dir so ProtectHome=read-only doesn't
+# block the lockfile uv writes on every invocation. Keeps the sandbox
+# scoped to a single ReadWritePaths entry.
+Environment=UV_CACHE_DIR=@INSTALL_DIR@/.uv-cache
 ExecStart=@HOME@/.local/bin/uv run python -m naarad.bot
 Restart=on-failure
 RestartSec=5s
@@ -23,10 +27,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-# Install dir for state.db + logs; ~/.cache/uv is uv's lockfile location
-# (it writes a .tmp file there on every invocation, including `uv run`).
-# Without it, uv aborts with "Read-only file system" before Python starts.
-ReadWritePaths=@INSTALL_DIR@ @HOME@/.cache/uv
+ReadWritePaths=@INSTALL_DIR@
 ProtectKernelTunables=true
 ProtectControlGroups=true
 
