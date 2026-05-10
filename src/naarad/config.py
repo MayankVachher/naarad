@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 from datetime import time as dtime
 from pathlib import Path
+from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, Field, field_validator
@@ -33,8 +34,14 @@ class LLMConfig(BaseModel):
     `enabled: false` permanently disables LLM-powered brief + water reminders;
     the runtime `/llm` command can't override this. When `enabled: true`, the
     runtime DB-backed flag (settings.llm_enabled) decides the live state.
+
+    `backend` selects which CLI to shell out to:
+      - ``"copilot"`` → GitHub Copilot CLI (default; needs ``copilot auth login``)
+      - ``"claude"``  → Anthropic Claude Code CLI (needs ``claude login`` or
+        ``ANTHROPIC_API_KEY``)
     """
     enabled: bool = True
+    backend: Literal["copilot", "claude"] = "copilot"
 
 
 class TickersConfig(BaseModel):

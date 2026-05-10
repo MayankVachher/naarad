@@ -37,9 +37,9 @@ from telegram.ext import Application, ContextTypes
 
 from naarad import db
 from naarad.config import Config
-from naarad.runtime import is_llm_enabled
-from naarad.water import copilot as water_copilot
+from naarad.llm import LLMTask, render
 from naarad.water import messages
+from naarad.water.prompt import build_water_prompt, first_nonempty_line
 from naarad.water.state import (
     Idle,
     Reminder,
@@ -56,6 +56,8 @@ log = logging.getLogger(__name__)
 
 JOB_NAME = "water-loop"
 CONFIRM_CALLBACK = "water:confirm"
+
+WATER_REMINDER_TIMEOUT = 45  # seconds; LLM line generation budget
 
 
 def water_config_from(config: Config) -> WaterConfig:
@@ -84,16 +86,23 @@ def _confirm_keyboard() -> InlineKeyboardMarkup:
 
 
 async def _render_reminder_text(config: Config, level: int) -> str:
-    """Generate the line for a reminder at this level. May call Copilot —
+    """Generate the line for a reminder at this level. May call the LLM —
     deliberately not under any lock so a slow subprocess can't block
     concurrent confirms.
     """
-    text = ""
-    if is_llm_enabled(config):
-        text = await water_copilot.generate_reminder_line(level)
-    if not text:
-        text = messages.reminder_text(level)
-    return text
+    fallback = messages.reminder_text(level)
+    return await render(
+        LLMTask(
+            prompt_builder=lambda: build_water_prompt(level),
+            # If the LLM drifts to multi-line, take the first non-empty
+            # line; if the LLM somehow returns blank, fall back too.
+            post_process=lambda raw: first_nonempty_line(raw) or fallback,
+            fallback=lambda: fallback,
+            timeout=WATER_REMINDER_TIMEOUT,
+            log_label="water-reminder",
+        ),
+        config,
+    )
 
 
 async def _send_reminder_text(

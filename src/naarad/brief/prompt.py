@@ -1,12 +1,15 @@
-"""Prompt construction for the daily brief.
+"""Prompt construction + body formatting for the daily brief.
 
-The Copilot CLI is given a fully-rendered prompt (no tools, no browsing).
-Raw source data — RSS, weather, sun times, on-this-day — is gathered in
-``brief/sources.py`` and inlined here so Copilot's job is pure
-summarization/rewriting.
+The configured LLM CLI is given a fully-rendered prompt (no tools, no
+browsing). Raw source data — RSS, weather, sun times, on-this-day — is
+gathered in ``brief/sources.py`` and inlined here so the LLM's job is
+pure summarization/rewriting.
 
 The template lives in code (not config.json) so it gets diff/PR review
 when it changes, and so iterating on it is a normal commit.
+
+``format_brief_body`` is the post-process step LLM call sites use to
+turn raw stdout into Telegram-safe HTML with the date header.
 """
 from __future__ import annotations
 
@@ -14,9 +17,25 @@ import logging
 from datetime import date
 
 from naarad.brief import sources
+from naarad.brief.sanitizer import sanitize_html
 from naarad.config import Config
 
 log = logging.getLogger(__name__)
+
+
+def brief_header(today: date) -> str:
+    """Plain-text date header, e.g. ``Fri May 1, 2026``."""
+    return today.strftime("%a %b ") + str(today.day) + today.strftime(", %Y")
+
+
+def format_brief_body(today: date, raw: str) -> str:
+    """Sanitize the LLM's raw stdout and prepend the date header.
+
+    Used as the ``post_process`` of every brief LLMTask so the scheduled
+    job and the manual /brief produce identical formatting.
+    """
+    body = sanitize_html(raw)
+    return f"<b>☀️ {brief_header(today)}</b>\n\n{body}"
 
 
 PROMPT_TEMPLATE = """\

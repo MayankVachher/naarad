@@ -95,7 +95,7 @@ def render_from_context(today: date, ctx: BriefContext) -> str:
 
 
 def render_plain_brief(today: date, config: Config) -> str:
-    """Fetch sources and render. Mirrors `get_daily_brief`'s self-contained shape."""
+    """Fetch sources and render."""
     try:
         ctx = sources.build_context(
             today=today,
@@ -108,3 +108,20 @@ def render_plain_brief(today: date, config: Config) -> str:
         log.exception("plain renderer: source fetch failed; using empty context")
         ctx = BriefContext(location_name=config.brief.location_name)
     return render_from_context(today, ctx)
+
+
+def safe_render_plain_brief(today: date, config: Config) -> str:
+    """Wrap ``render_plain_brief`` with a final safety net so even a crash
+    in the deterministic path can't leave the user with no morning post.
+    Used as the fallback in the scheduled brief's LLMTask.
+    """
+    try:
+        return render_plain_brief(today, config)
+    except Exception:
+        log.exception("plain renderer crashed; emitting placeholder")
+        header = today.strftime("%a %b ") + str(today.day) + today.strftime(", %Y")
+        return (
+            f"<b>☀️ {header}</b>\n\n"
+            "(Brief unavailable today — both the LLM and the plain renderer "
+            "failed. See logs.)"
+        )

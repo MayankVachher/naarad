@@ -21,7 +21,11 @@ A single long-running bot process. Daily brief + water reminders + the 11:00 fal
 
 Optional:
 
-- The **GitHub Copilot CLI** (`copilot`) on `PATH`, signed in. When present, the brief and water reminders are written by the LLM; without it the brief renders deterministically from the same RSS / weather / sun / Wikipedia data, and water reminders use a hardcoded escalating tone table. Set `config.llm.enabled: false` to permanently disable LLM features even if `copilot` is installed. Override the binary path via the `COPILOT_BIN` env var if it isn't on `PATH`.
+- An **LLM CLI** on `PATH`, signed in. Pick one via `config.llm.backend`:
+  - `"copilot"` (default) — GitHub Copilot CLI, `copilot auth login`. Override the binary path via `COPILOT_BIN`.
+  - `"claude"` — Anthropic [Claude Code](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview) CLI, `claude login` or set `ANTHROPIC_API_KEY`. Override the binary path via `CLAUDE_BIN`.
+
+  When present, the brief and water reminders are written by the LLM; without it the brief renders deterministically from the same RSS / weather / sun / Wikipedia data, and water reminders use a hardcoded escalating tone table. Set `config.llm.enabled: false` to permanently disable LLM features regardless of which CLI is installed.
 - An **EODHD API key** for `/quote` and the market open/close briefs. Without it those features stay dormant; the rest of the bot is unaffected (see `/status` for the off-reason).
 
 ## Setup (local dev)
@@ -55,7 +59,11 @@ The script is idempotent — re-run after editing config or pulling updates. It 
 5. `sed` the systemd unit template into `/etc/systemd/system/naarad.service`, then `daemon-reload` + `enable` + `restart`
 6. print status + log paths
 
-**Optional:** install the [GitHub Copilot CLI](https://docs.github.com/en/copilot) and `copilot auth login` *before* running the script if you want LLM-written briefs and water reminders. The script doesn't auto-install it. Without Copilot, the bot uses the deterministic plain renderer and hardcoded reminder tones.
+**Optional:** install an LLM CLI *before* running the script if you want LLM-written briefs and water reminders. Either:
+- GitHub Copilot CLI (`copilot auth login`) — default; or
+- Claude Code CLI (`claude login` or `ANTHROPIC_API_KEY`) + set `"backend": "claude"` in `config.json`'s `llm` block.
+
+Without either, the bot uses the deterministic plain renderer and hardcoded reminder tones.
 
 Logs go to **two places** by design: journald (`journalctl -u naarad`) and `logs/naarad.log` (rotating, 5 MB × 3) inside the install directory.
 
@@ -106,6 +114,8 @@ Everything lives in `config.json` (gitignored). See `config.example.json` for th
 | `brief.location_*` | City / lat / lon for the weather + sunrise lookup |
 | `morning.start_time` | When the daily brief is generated (default 06:00) |
 | `morning.fallback_time` | Auto-start the water chain by this time if you haven't tapped Start (default 11:00) |
+| `llm.enabled` | Compile-time floor for LLM features (default true) |
+| `llm.backend` | Which CLI to shell out to: `"copilot"` (default) or `"claude"` |
 | `tickers.enabled` | Compile-time floor for the market jobs + /quote (default true) |
 | `tickers.market_timezone` | Timezone the market_open/market_close fire in (default America/New_York) |
 | `tickers_default` | Seed tickers (default `GOOGL, NVDA, VFV.TO, VCN.TO`) |
@@ -117,7 +127,7 @@ Everything lives in `config.json` (gitignored). See `config.example.json` for th
 |---------|--------------|
 | `/water` | Confirm you drank water (resets the chain) |
 | `/brief` | Re-run today's morning brief on demand (good for prompt iteration) |
-| `/llm on\|off` | Toggle Copilot-generated brief + water lines at runtime |
+| `/llm on\|off` | Toggle LLM-generated brief + water lines at runtime |
 | `/ticker add SYMBOL` | Track a new ticker (US bare or `.TO` suffix; symbol is validated) |
 | `/ticker remove SYMBOL` | Stop tracking |
 | `/ticker list` | List tracked tickers |

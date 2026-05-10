@@ -1,18 +1,16 @@
 """Morning fallback + daily brief schedulers.
 
 In-process schedulers running inside the bot:
-- Daily brief at config.morning.start_time (06:00) — replaces the cron entry
-  for local dev. Production deployments can still use cron via deploy/crontab.txt.
+- Daily brief at config.morning.start_time (06:00).
 - Daily fallback at config.morning.fallback_time (11:00): if the user hasn't
   tapped [☀️ Start day] yet, send a gentle "starting anyway" message, strip
   the button, and kick off water tracking.
 
-On bot startup, also runs morning-fallback catch-up if we're past today's
-fallback time and the day isn't started.
+On bot startup, also runs catch-up paths for both jobs if their normal
+firing times have already passed today.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import datetime, timedelta
 
@@ -33,12 +31,16 @@ FALLBACK_MESSAGE = "👋 Quiet morning — starting water tracking anyway."
 
 
 async def _brief_callback(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Run the daily brief in a worker thread (subprocess + httpx are blocking)."""
-    # Imported lazily so test harnesses don't pull telegram_api in unrelated tests.
+    """Run the daily brief on the event loop.
+
+    The brief itself runs the LLM subprocess via ``asyncio.to_thread``
+    inside ``llm.render``, so the loop stays responsive while waiting on
+    the 30-90s call.
+    """
     from naarad.jobs.daily_brief import run_brief
     log.info("daily brief job firing")
     try:
-        rc = await asyncio.to_thread(run_brief)
+        rc = await run_brief(context.application)
         log.info("daily brief job done (rc=%d)", rc)
     except Exception:
         log.exception("daily brief job crashed")

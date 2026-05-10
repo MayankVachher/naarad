@@ -21,7 +21,8 @@
     "fallback_time": "11:00"
   },
   "llm": {
-    "enabled": true
+    "enabled": true,
+    "backend": "copilot"
   },
   "tickers": {
     "enabled": true,

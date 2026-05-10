@@ -26,7 +26,7 @@ from naarad.config import (
 from naarad.config import (
     WaterConfig as ConfigWater,
 )
-from naarad.water import copilot as water_copilot
+from naarad.llm.runner import LLMResult
 from naarad.water import scheduler as water_scheduler
 from naarad.water.scheduler import water_config_from
 
@@ -86,15 +86,16 @@ class FakeApp:
 
 
 @pytest.fixture(autouse=True)
-def stub_copilot_reminder(monkeypatch):
-    """Force the copilot reminder generator to fall back to the hardcoded line.
+def stub_llm_runner(monkeypatch):
+    """Force the LLM runner to return a failed result so render() takes
+    the fallback path (the hardcoded ``messages._TONES`` line).
 
-    Otherwise these tests would invoke the real `copilot` CLI on every
-    `_send_reminder` call (slow + brittle).
+    Otherwise these tests would shell out to the real ``copilot``/``claude``
+    CLI on every reminder send (slow + brittle).
     """
-    async def _empty(level, timeout=45):
-        return ""
-    monkeypatch.setattr(water_copilot, "generate_reminder_line", _empty)
+    def _fail(backend, prompt, timeout, log_label):
+        return LLMResult(ok=False, error_reason="stubbed-out")
+    monkeypatch.setattr("naarad.llm.dispatch.run_llm", _fail)
 
 
 @pytest.fixture

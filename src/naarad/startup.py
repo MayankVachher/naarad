@@ -3,9 +3,9 @@
 Philosophy:
 - Things that make the bot useless = FATAL (token shape, chat_id, DB path).
   Better to crash at boot than to silently fail at the next reminder.
-- Things that have a graceful fallback = WARN (copilot binary, EODHD key).
+- Things that have a graceful fallback = WARN (LLM CLI, EODHD key).
   The brief and water reminders fall back to placeholders / hardcoded
-  lines, so a missing copilot CLI degrades the bot but doesn't break it.
+  lines, so a missing LLM CLI degrades the bot but doesn't break it.
   Tickers are independent of the rest — a missing EODHD key disables them
   via `is_tickers_enabled` and the bot still serves /water, /brief, etc.
 
@@ -19,7 +19,7 @@ import subprocess
 from pathlib import Path
 
 from naarad.config import Config
-from naarad.copilot_runner import copilot_bin
+from naarad.llm import get_backend, resolve_bin
 
 log = logging.getLogger(__name__)
 
@@ -63,13 +63,14 @@ def _validate_db_writable(db_path: str) -> None:
         ) from exc
 
 
-def _check_copilot_available() -> None:
-    """Best-effort. Logs WARN if copilot isn't reachable; never raises.
-
-    Brief + water reminder generators already fall back to placeholders /
-    hardcoded text, so the bot remains usable.
+def _check_llm_backend(config: Config) -> None:
+    """Best-effort: pings ``<bin> --version`` for the configured backend.
+    Logs WARN on any non-success; never raises. Brief + water reminders
+    already fall back to deterministic text, so a missing CLI degrades
+    the bot but doesn't break it.
     """
-    bin_path = copilot_bin()
+    backend = get_backend(config.llm.backend)
+    bin_path = resolve_bin(backend)
     try:
         result = subprocess.run(
             [bin_path, "--version"],
@@ -80,26 +81,34 @@ def _check_copilot_available() -> None:
         )
     except FileNotFoundError:
         log.warning(
-            "copilot CLI not found at %r — brief + water reminders will use "
-            "fallback text. Set COPILOT_BIN or install the GitHub Copilot CLI.",
-            bin_path,
+            "%s CLI not found at %r — brief + water reminders will use "
+            "fallback text. Set %s or install the CLI.",
+            backend.name, bin_path, backend.env_var,
         )
         return
     except subprocess.TimeoutExpired:
-        log.warning("copilot --version timed out after 5s; assuming degraded mode")
+        log.warning(
+            "%s --version timed out after 5s; assuming degraded mode",
+            backend.name,
+        )
         return
     except Exception:  # noqa: BLE001
-        log.exception("copilot --version raised; assuming degraded mode")
+        log.exception("%s --version raised; assuming degraded mode", backend.name)
         return
 
     if result.returncode != 0:
         log.warning(
-            "copilot --version exited %d (stderr=%r); assuming degraded mode",
-            result.returncode, (result.stderr or "").strip(),
+            "%s --version exited %d (stderr=%r); assuming degraded mode",
+            backend.name, result.returncode, (result.stderr or "").strip(),
         )
         return
 
-    log.info("copilot CLI ok: %s", (result.stdout or "").strip().splitlines()[0])
+    first_line = (result.stdout or "").strip().splitlines()
+    log.info(
+        "%s CLI ok: %s",
+        backend.name,
+        first_line[0] if first_line else "(no version output)",
+    )
 
 
 def _check_eodhd_for_tickers(config: Config) -> None:
@@ -127,5 +136,5 @@ def validate_startup(config: Config) -> None:
     _validate_chat_id(config.telegram.chat_id)
     _validate_db_writable(config.db_path)
     _check_eodhd_for_tickers(config)
-    _check_copilot_available()
+    _check_llm_backend(config)
     log.info("startup validation passed")
