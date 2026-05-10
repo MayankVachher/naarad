@@ -23,7 +23,10 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=@INSTALL_DIR@
+# Install dir for state.db + logs; ~/.cache/uv is uv's lockfile location
+# (it writes a .tmp file there on every invocation, including `uv run`).
+# Without it, uv aborts with "Read-only file system" before Python starts.
+ReadWritePaths=@INSTALL_DIR@ @HOME@/.cache/uv
 ProtectKernelTunables=true
 ProtectControlGroups=true
 
