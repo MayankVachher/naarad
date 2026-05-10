@@ -153,6 +153,53 @@ async def test_invalid_arg_shows_usage(tmp_path: Path) -> None:
     assert db.get_setting(config.db_path, LLM_FLAG_KEY) is None
 
 
+# ---- /llm test --------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_llm_test_success_path(tmp_path: Path, monkeypatch) -> None:
+    """/llm test acks, runs smoketest, edits ack with ✓ + line."""
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    update = make_update()
+    ack = AsyncMock()
+    update.message.reply_text = AsyncMock(return_value=ack)
+
+    async def _ok(config):
+        return True, "🌙 Online and slightly bored."
+    monkeypatch.setattr(
+        "naarad.handlers.llm.run_smoketest", _ok,
+    )
+
+    await llm_command(update, make_context(config, args=["test"]))
+
+    update.message.reply_text.assert_awaited_once()  # the "⏳ Testing LLM…" ack
+    ack.edit_text.assert_awaited_once()
+    text = ack.edit_text.await_args.args[0]
+    assert "✓" in text
+    assert "Online and slightly bored" in text
+
+
+@pytest.mark.asyncio
+async def test_llm_test_failure_path(tmp_path: Path, monkeypatch) -> None:
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    update = make_update()
+    ack = AsyncMock()
+    update.message.reply_text = AsyncMock(return_value=ack)
+
+    async def _fail(config):
+        return False, "copilot CLI not found on PATH"
+    monkeypatch.setattr(
+        "naarad.handlers.llm.run_smoketest", _fail,
+    )
+
+    await llm_command(update, make_context(config, args=["test"]))
+
+    text = ack.edit_text.await_args.args[0]
+    assert "✗" in text
+    assert "copilot CLI not found" in text
+
+
 # ---- auth gate ---------------------------------------------------------------
 
 @pytest.mark.asyncio

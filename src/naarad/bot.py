@@ -25,6 +25,7 @@ from naarad.handlers import quote as quote_handlers
 from naarad.handlers import status as status_handlers
 from naarad.handlers import tickers as ticker_handlers
 from naarad.handlers import water as water_handlers
+from naarad.handlers import welcome as welcome_handlers
 from naarad.jobs import scheduler as ticker_scheduler
 from naarad.morning import scheduler as morning_scheduler
 from naarad.startup import validate_startup
@@ -70,6 +71,10 @@ def build_application(config: Config) -> Application:
     app.add_handler(CallbackQueryHandler(
         morning_handlers.start_day_button,
         pattern=f"^{morning_handlers.START_DAY_CALLBACK}$",
+    ))
+    app.add_handler(CallbackQueryHandler(
+        welcome_handlers.welcome_button,
+        pattern=f"^{welcome_handlers.WELCOME_BUTTON_CALLBACK}$",
     ))
     # Reply-to-reminder confirm. Exclude commands so /water doesn't double-fire.
     app.add_handler(MessageHandler(filters.REPLY & ~filters.COMMAND, water_handlers.water_reply))
