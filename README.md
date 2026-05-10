@@ -72,6 +72,8 @@ To pull updates: `git pull && uv sync && sudo systemctl restart naarad`.
 
 To remove: `./deploy/uninstall.sh` (or `./deploy/uninstall.fish`) — stops, disables, and removes the systemd unit. Repo, config, DB, and logs are left in place.
 
+**Running under a hardened account** (e.g. the `ai-agent` user from [pi-hardening](https://github.com/MayankVachher/pi-hardening)): use `deploy/naarad-hardened.service.template` instead of the default. It runs naarad as a sandboxed user with no sudo, no LAN, restricted home access, and `ReadWritePaths` punched only for the install dir and the LLM CLI's auth-token store. The template's leading comment has the exact `sed` substitution and install commands.
+
 <details>
 <summary>Manual install (no script)</summary>
 

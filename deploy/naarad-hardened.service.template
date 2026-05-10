@@ -1,0 +1,79 @@
+# Naarad systemd unit — HARDENED template for pi-hardening setups.
+#
+# Use this when naarad runs as a dedicated sandboxed user (typically the
+# `ai-agent` account from https://github.com/MayankVachher/pi-hardening),
+# NOT as your own login user. The bot can shell out to a third-party
+# LLM CLI; isolating it from your home dir, sudo, and your LAN limits
+# the blast radius if anything in that subprocess chain is compromised.
+#
+# Substitute these placeholders before installing:
+#   @AI_USER@          the sandboxed account (e.g. ai-agent)
+#   @AI_HOME@          its home dir (e.g. /home/ai-agent)
+#   @INSTALL_DIR@      where naarad is cloned (e.g. /srv/ai-agent/naarad)
+#   @LLM_CONFIG_DIR@   the LLM CLI's auth-token store; pick ONE:
+#                        - Copilot:  @AI_HOME@/.config/copilot
+#                        - Claude:   @AI_HOME@/.claude
+#
+# One-liner sed (copy + edit values, then run):
+#
+#   sudo sed \
+#     -e 's|@AI_USER@|ai-agent|g' \
+#     -e 's|@AI_HOME@|/home/ai-agent|g' \
+#     -e 's|@INSTALL_DIR@|/srv/ai-agent/naarad|g' \
+#     -e 's|@LLM_CONFIG_DIR@|/home/ai-agent/.config/copilot|g' \
+#     deploy/naarad-hardened.service.template | \
+#     sudo tee /etc/systemd/system/naarad.service > /dev/null
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now naarad
+#
+# Run this from your MAIN user (with sudo), NOT from inside an
+# @AI_USER@ shell — @AI_USER@ has no sudo by design.
+
+[Unit]
+Description=Naarad Telegram bot (sandboxed)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@AI_USER@
+Group=@AI_USER@
+WorkingDirectory=@INSTALL_DIR@
+
+# Two PATH entries are required because the LLM CLIs install to
+# different locations depending on their installer:
+#   - uv lands in ~/.local/bin (curl installer)
+#   - npm-installed copilot lands in ~/.npm-global/bin if you set
+#     `npm config set prefix ~/.npm-global` to avoid needing sudo
+#   - claude lands in ~/.local/bin
+Environment=PATH=@AI_HOME@/.local/bin:@AI_HOME@/.npm-global/bin:/usr/local/bin:/usr/bin:/bin
+
+# Redirect uv's cache into the install dir so ProtectHome=read-only
+# doesn't block uv's lockfile. Keeps the sandbox tight.
+Environment=UV_CACHE_DIR=@INSTALL_DIR@/.uv-cache
+
+ExecStart=@AI_HOME@/.local/bin/uv run python -m naarad.bot
+Restart=on-failure
+RestartSec=5s
+
+# --- Hardening ---
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+# Install dir for state.db + logs + uv cache. The LLM CLI's config dir
+# is also writable because both Copilot and Claude refresh auth tokens
+# during long-running sessions and need to persist them back. Keep this
+# narrow — DO NOT widen to all of @AI_HOME@; that defeats ProtectHome.
+ReadWritePaths=@INSTALL_DIR@ @LLM_CONFIG_DIR@
+ProtectKernelTunables=true
+ProtectControlGroups=true
+
+# Capture stdout/stderr to journald (`journalctl -u naarad`).
+# The bot also writes logs/naarad.log via RotatingFileHandler.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=naarad
+
+[Install]
+WantedBy=multi-user.target
