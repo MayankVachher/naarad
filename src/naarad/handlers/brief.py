@@ -1,16 +1,13 @@
 """/brief — manual trigger for today's brief.
 
-Runs the same prompt + post-process pipeline as the 06:00 scheduled job,
-but without the [Start day] button. Use it to iterate on the prompt or
-to re-fire after a fallback.
+Same prompt + post-process pipeline as the 06:00 scheduled job, minus
+the [Start day] button. Use it to re-fire after a fallback or to
+iterate on the prompt.
 
-Fallback policy is deliberately different from the scheduled flow:
-when /brief fails the user is *expecting* output and is sitting at the
-chat — show them an explicit "❌ generation failed" so they can decide
-what to do, instead of silently demoting to the deterministic plain
-renderer (which is the right choice at 06:00 when there's nobody
-watching). The scheduled job's fallback lives in
-``jobs/daily_brief.run_brief``.
+Fallback is the deterministic plain renderer — identical to the
+scheduled flow. LLM unavailability is a logged event, not a user-
+visible failure: the plain renderer uses the same source data and
+produces a fully-formed brief.
 """
 from __future__ import annotations
 
@@ -21,6 +18,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from naarad import db
+from naarad.brief.plain_renderer import safe_render_plain_brief
 from naarad.brief.prompt import build_prompt, format_brief_body
 from naarad.config import Config
 from naarad.handlers.auth import reject_unauthorized
@@ -30,11 +28,6 @@ from naarad.llm import LLMTask, render
 log = logging.getLogger(__name__)
 
 BRIEF_TIMEOUT = 600  # seconds; LLMs can take a while
-
-# Sentinel returned by the /brief LLMTask fallback. The handler checks
-# for it and shows an explicit error to the user instead of editing in
-# placeholder text.
-_FAILURE_SENTINEL = "__brief_failed__"
 
 
 def _record_brief_sent(config: Config, today_iso: str) -> None:
@@ -68,19 +61,12 @@ async def brief_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         LLMTask(
             prompt_builder=lambda: build_prompt(today, config),
             post_process=lambda raw: format_brief_body(today, raw),
-            fallback=lambda: _FAILURE_SENTINEL,
+            fallback=lambda: safe_render_plain_brief(today, config),
             timeout=BRIEF_TIMEOUT,
             log_label="brief-cmd",
         ),
         config,
     )
-
-    if body == _FAILURE_SENTINEL:
-        await ack.edit_text(
-            "❌ Brief generation failed (LLM unavailable or timed out). "
-            "Try /brief again, or check the logs."
-        )
-        return
 
     # Replace the placeholder with the real thing so the chat stays tidy.
     try:

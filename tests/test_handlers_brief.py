@@ -85,25 +85,6 @@ async def test_brief_acks_then_edits_with_body(tmp_path: Path, monkeypatch) -> N
 
 
 @pytest.mark.asyncio
-async def test_brief_shows_error_on_llm_failure(tmp_path: Path, monkeypatch) -> None:
-    """When the LLM fails, /brief tells the user explicitly instead of
-    silently demoting to the deterministic plain renderer (which is the
-    scheduled flow's job)."""
-    config = make_config(tmp_path)
-    db.init_db(config.db_path)
-    update, ack = make_update()
-    stub_render(monkeypatch, brief_handlers._FAILURE_SENTINEL)
-
-    await brief_handlers.brief_command(update, make_context(config))
-
-    ack.edit_text.assert_awaited_once()
-    msg = ack.edit_text.await_args.args[0]
-    assert "❌" in msg or "failed" in msg.lower()
-    # And the marker MUST NOT be set, so a later catch-up still fires.
-    assert db.get_setting(config.db_path, LAST_BRIEF_SETTING) is None
-
-
-@pytest.mark.asyncio
 async def test_brief_falls_back_to_new_message_when_edit_fails(
     tmp_path: Path, monkeypatch
 ) -> None:
