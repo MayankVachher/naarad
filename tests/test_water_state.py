@@ -114,6 +114,18 @@ def test_level_caps_at_max_and_uses_smallest_interval():
 
 # ---------- Confirm reset ----------
 
+def test_confirm_increments_glasses_today():
+    state = WaterState(glasses_today=2, day_started_on=date(2026, 5, 2))
+    after = apply_confirm(state, at(2026, 5, 2, 10, 0))
+    assert after.glasses_today == 3
+
+
+def test_day_started_resets_glasses_today():
+    state = WaterState(glasses_today=7, last_drink_at=at(2026, 5, 1, 18, 0))
+    after = apply_day_started(state, date(2026, 5, 2), at(2026, 5, 2, 8, 0))
+    assert after.glasses_today == 0
+
+
 def test_confirm_resets_level_and_anchor():
     state = WaterState(
         day_started_on=date(2026, 5, 2),

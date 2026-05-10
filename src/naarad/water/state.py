@@ -45,6 +45,10 @@ class WaterState:
     # on a freshly-started day. Survives bot restart so a crash mid-grace
     # doesn't reset the timer.
     chain_started_at: datetime | None = None
+    # Count of confirms since the day started. Reset to 0 by
+    # apply_day_started, incremented by apply_confirm. Surfaced back to
+    # the user in the confirm response and the "✅ logged" edit.
+    glasses_today: int = 0
 
 
 @dataclass(frozen=True)
@@ -161,8 +165,8 @@ def next_action(state: WaterState, now: datetime, cfg: WaterConfig) -> Action:
 
 def apply_day_started(state: WaterState, today: date, now: datetime) -> WaterState:
     """Morning Start fired (via tap or fallback): reset chain for the
-    new day and stamp ``chain_started_at`` so next_action can apply the
-    first-reminder grace period.
+    new day, stamp ``chain_started_at`` so next_action can apply the
+    first-reminder grace period, and zero the day's glass counter.
     """
     return replace(
         state,
@@ -171,16 +175,20 @@ def apply_day_started(state: WaterState, today: date, now: datetime) -> WaterSta
         last_reminder_at=None,
         level=0,
         chain_started_at=now,
+        glasses_today=0,
     )
 
 
 def apply_confirm(state: WaterState, now: datetime) -> WaterState:
-    """User said they drank water: reset chain, level=0, anchor=now."""
+    """User said they drank water: reset chain, level=0, anchor=now,
+    bump the day's glass counter by one.
+    """
     return replace(
         state,
         last_drink_at=now,
         last_reminder_at=None,
         level=0,
+        glasses_today=state.glasses_today + 1,
     )
 
 

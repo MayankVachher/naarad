@@ -94,6 +94,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await update.message.reply_text(
         f"<b>Naarad status</b>\n"
         f"Day started: {'yes' if day_started else 'no'}\n"
+        f"Glasses today: {raw['glasses_today']}\n"
         f"Next reminder: {next_str}\n"
         f"Last drink: {last_str}\n"
         f"Water level: {raw['level']}\n"

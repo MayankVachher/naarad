@@ -16,7 +16,7 @@ from contextlib import contextmanager
 from datetime import date, datetime
 from pathlib import Path
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 def _to_iso_dt(value: datetime | None) -> str | None:
@@ -116,7 +116,8 @@ def init_db(db_path: str | Path, seed_tickers: list[str] | None = None) -> None:
                     "  last_msg_id              INTEGER,"
                     "  day_started_on           TEXT,"
                     "  start_button_message_id  INTEGER,"
-                    "  chain_started_at         TEXT"
+                    "  chain_started_at         TEXT,"
+                    "  glasses_today            INTEGER NOT NULL DEFAULT 0"
                     ")"
                 )
                 conn.execute(
@@ -179,6 +180,21 @@ def init_db(db_path: str | Path, seed_tickers: list[str] | None = None) -> None:
                 conn.execute("UPDATE schema_version SET version = ?", (4,))
             current = 4
 
+        if current < 5:
+            # v4 -> v5: add glasses_today counter. Reset to 0 by
+            # apply_day_started, incremented by apply_confirm.
+            with _transaction(conn):
+                cols = {
+                    r["name"] for r in conn.execute("PRAGMA table_info(water_state)")
+                }
+                if "glasses_today" not in cols:
+                    conn.execute(
+                        "ALTER TABLE water_state ADD COLUMN "
+                        "glasses_today INTEGER NOT NULL DEFAULT 0"
+                    )
+                conn.execute("UPDATE schema_version SET version = ?", (5,))
+            current = 5
+
         if seed_tickers:
             existing = {r["symbol"] for r in conn.execute("SELECT symbol FROM tickers")}
             if not existing:
@@ -230,7 +246,8 @@ def get_water_state(db_path: str | Path) -> dict:
     with connect(db_path) as conn:
         row = conn.execute(
             "SELECT last_drink_at, last_reminder_at, level, last_msg_id, "
-            "       day_started_on, start_button_message_id, chain_started_at "
+            "       day_started_on, start_button_message_id, chain_started_at, "
+            "       glasses_today "
             "FROM water_state WHERE id = 1"
         ).fetchone()
     if row is None:
@@ -242,6 +259,7 @@ def get_water_state(db_path: str | Path) -> dict:
             "day_started_on": None,
             "start_button_message_id": None,
             "chain_started_at": None,
+            "glasses_today": 0,
         }
     return {
         "last_drink_at": _from_iso_dt(row["last_drink_at"]),
@@ -251,6 +269,7 @@ def get_water_state(db_path: str | Path) -> dict:
         "day_started_on": _from_iso_date(row["day_started_on"]),
         "start_button_message_id": row["start_button_message_id"],
         "chain_started_at": _from_iso_dt(row["chain_started_at"]),
+        "glasses_today": row["glasses_today"],
     }
 
 
@@ -269,6 +288,7 @@ def update_water_state(db_path: str | Path, **fields) -> None:
         "day_started_on",
         "start_button_message_id",
         "chain_started_at",
+        "glasses_today",
     }
     bad = set(fields) - allowed
     if bad:

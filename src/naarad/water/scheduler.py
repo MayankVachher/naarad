@@ -82,6 +82,7 @@ def _state_from_db(config: Config) -> WaterState:
         last_msg_id=raw["last_msg_id"],
         day_started_on=raw["day_started_on"],
         chain_started_at=raw["chain_started_at"],
+        glasses_today=raw["glasses_today"],
     )
 
 
@@ -276,15 +277,19 @@ async def start_day(app: Application) -> None:
                 last_reminder_at=None,
                 level=0,
                 chain_started_at=new_state.chain_started_at,
+                glasses_today=0,
             )
     # Lock released — run_loop will reacquire per transition.
     await run_loop(app)
 
 
-async def confirm_drink(app: Application) -> None:
-    """Apply a confirm event from a handler (button / cmd / reply) and reschedule.
+async def confirm_drink(app: Application) -> int:
+    """Apply a confirm event from a handler (button / cmd / reply) and
+    reschedule. Returns the new glasses_today count for the caller to
+    surface in the confirm response.
 
-    Note: a confirm before day_start is silently ignored (no escalation runs).
+    Note: a confirm before day_start is silently ignored (no escalation
+    runs), but glasses_today still increments — the user did drink.
     """
     config: Config = app.bot_data["config"]
     lock: asyncio.Lock = app.bot_data["water_lock"]
@@ -296,5 +301,7 @@ async def confirm_drink(app: Application) -> None:
             last_drink_at=new_state.last_drink_at,
             last_reminder_at=new_state.last_reminder_at,
             level=new_state.level,
+            glasses_today=new_state.glasses_today,
         )
     await run_loop(app)
+    return new_state.glasses_today

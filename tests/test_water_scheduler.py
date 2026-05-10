@@ -227,6 +227,26 @@ async def test_start_day_idempotent_within_day(app, freeze_now):
 # ---------- confirm flow ----------
 
 @pytest.mark.asyncio
+async def test_confirm_drink_returns_new_glass_count(app, freeze_now):
+    """confirm_drink is the canonical accessor handlers use to get the
+    count for the user-visible response. It must return the post-confirm
+    count atomically with the state mutation."""
+    cfg = app.bot_data["config"]
+    freeze_now["now"] = datetime(2026, 5, 2, 8, 30, tzinfo=TZ)
+    await water_scheduler.start_day(app)
+
+    freeze_now["now"] = datetime(2026, 5, 2, 9, 0, tzinfo=TZ)
+    n1 = await water_scheduler.confirm_drink(app)
+    assert n1 == 1
+    assert db.get_water_state(cfg.db_path)["glasses_today"] == 1
+
+    freeze_now["now"] = datetime(2026, 5, 2, 10, 0, tzinfo=TZ)
+    n2 = await water_scheduler.confirm_drink(app)
+    assert n2 == 2
+    assert db.get_water_state(cfg.db_path)["glasses_today"] == 2
+
+
+@pytest.mark.asyncio
 async def test_confirm_resets_level_and_schedules_2h_out(app, freeze_now):
     cfg = app.bot_data["config"]
     # Day already started + first reminder fired.
