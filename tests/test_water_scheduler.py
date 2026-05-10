@@ -53,6 +53,7 @@ def make_config(db_path: Path) -> Config:
 class FakeBot:
     def __init__(self) -> None:
         self.sent: list[dict] = []
+        self.stripped: list[int] = []  # message_ids whose buttons were removed
         self._next_msg_id = 1000
 
     async def send_message(self, *, chat_id, text, reply_markup=None):
@@ -60,6 +61,11 @@ class FakeBot:
         self._next_msg_id += 1
         self.sent.append({"chat_id": chat_id, "text": text, "message_id": msg_id})
         return SimpleNamespace(message_id=msg_id)
+
+    async def edit_message_reply_markup(self, *, chat_id, message_id, reply_markup):
+        # We only ever call this with reply_markup=None to strip the keyboard.
+        assert reply_markup is None
+        self.stripped.append(message_id)
 
 
 class FakeJobQueue:
@@ -375,6 +381,42 @@ async def test_first_reminder_uses_first_of_day_fallback(app, freeze_now):
     # The hardcoded first-of-day fallback wins because the autouse
     # fixture stubs out the LLM with a failure result.
     assert text == "💧 Morning. First sip when you're ready."
+
+
+@pytest.mark.asyncio
+async def test_new_reminder_strips_button_off_previous(app, freeze_now):
+    """Each new reminder strips the 💧 button off the previous one so
+    only the latest reminder is tappable. The first reminder of the day
+    has nothing to strip; the second strips the first's; the third
+    strips the second's; etc."""
+    cfg = app.bot_data["config"]
+    freeze_now["now"] = datetime(2026, 5, 2, 8, 30, tzinfo=TZ)
+    await water_scheduler.start_day(app)
+
+    # First reminder fires after the 5-min grace.
+    freeze_now["now"] = datetime(2026, 5, 2, 8, 35, tzinfo=TZ)
+    await water_scheduler.run_loop(app)
+    assert len(app.bot.sent) == 1
+    first_msg_id = app.bot.sent[-1]["message_id"]
+    # Nothing to strip — there's no previous reminder yet.
+    assert app.bot.stripped == []
+
+    # Second reminder fires after intervals[1] = 60min from the first.
+    freeze_now["now"] = datetime(2026, 5, 2, 9, 35, tzinfo=TZ)
+    await water_scheduler.run_loop(app)
+    assert len(app.bot.sent) == 2
+    second_msg_id = app.bot.sent[-1]["message_id"]
+    # The first reminder's button got stripped before the second sent.
+    assert app.bot.stripped == [first_msg_id]
+
+    # Third reminder strips the second.
+    freeze_now["now"] = datetime(2026, 5, 2, 10, 5, tzinfo=TZ)  # +intervals[2]=30
+    await water_scheduler.run_loop(app)
+    assert len(app.bot.sent) == 3
+    assert app.bot.stripped == [first_msg_id, second_msg_id]
+
+    # DB last_msg_id always points at the most recent.
+    assert db.get_water_state(cfg.db_path)["last_msg_id"] == app.bot.sent[-1]["message_id"]
 
 
 @pytest.mark.asyncio

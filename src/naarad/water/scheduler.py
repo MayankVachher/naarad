@@ -135,6 +135,24 @@ async def _send_reminder_text(
     )
 
 
+async def _strip_reminder_button(
+    app: Application, config: Config, message_id: int
+) -> None:
+    """Best-effort removal of the 💧 button from a prior reminder so the
+    user can only tap the latest one. Telegram may reject the edit if
+    the message was deleted or is too old; we don't care — the button
+    not being there is the goal.
+    """
+    try:
+        await app.bot.edit_message_reply_markup(
+            chat_id=config.telegram.chat_id,
+            message_id=message_id,
+            reply_markup=None,
+        )
+    except Exception:
+        log.debug("strip-previous-reminder-button failed", exc_info=True)
+
+
 def _now(tz: ZoneInfo) -> datetime:
     return datetime.now(tz)
 
@@ -200,6 +218,13 @@ async def run_loop(app: Application) -> None:
                 # ended (Idle). Discard the rendered text and let the next
                 # loop iteration handle whatever the new state wants.
                 continue
+
+            # Strip the 💧 button off the previous reminder before
+            # posting the new one — only the latest reminder should be
+            # tappable, otherwise the user can confirm via a stale
+            # message and the UI shows multiple live buttons.
+            if state.last_msg_id is not None:
+                await _strip_reminder_button(app, config, state.last_msg_id)
 
             try:
                 msg = await _send_reminder_text(app, config, text)
