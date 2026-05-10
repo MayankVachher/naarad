@@ -77,11 +77,12 @@ def test_copilot_flags_disable_tools_and_prompts():
 
 
 def test_claude_flags_lock_to_single_turn_no_tools():
+    """Claude Code CLI flags are camelCase per upstream reference."""
     flags = CLAUDE.flags
-    assert "--max-turns" in flags
-    assert "--disallowed-tools" in flags
+    assert "--maxTurns" in flags
+    assert "--disallowedTools" in flags
     # Disallowed list should at least include the dangerous ones.
-    idx = flags.index("--disallowed-tools")
+    idx = flags.index("--disallowedTools")
     disallowed = flags[idx + 1]
     for t in ("Bash", "Edit", "Write"):
         assert t in disallowed
@@ -219,6 +220,28 @@ async def test_render_returns_empty_when_fallback_also_crashes(tmp_path, monkeyp
     )
     out = await render(task, config)
     assert out == ""
+
+
+@pytest.mark.asyncio
+async def test_render_uses_fallback_when_llm_check_raises(tmp_path, monkeypatch):
+    """A corrupt/locked SQLite making is_llm_enabled raise must not
+    propagate; render is documented to never raise."""
+    config = make_config(tmp_path)
+
+    def _boom(config, db_path=None):
+        raise RuntimeError("DB read crashed")
+
+    monkeypatch.setattr("naarad.llm.dispatch.is_llm_enabled", _boom)
+
+    task = LLMTask(
+        prompt_builder=lambda: "P",
+        post_process=lambda r: r,
+        fallback=lambda: "FALLBACK",
+        timeout=10,
+        log_label="t",
+    )
+    out = await render(task, config)
+    assert out == "FALLBACK"
 
 
 @pytest.mark.asyncio

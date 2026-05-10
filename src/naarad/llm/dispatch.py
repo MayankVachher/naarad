@@ -57,12 +57,28 @@ async def render(task: LLMTask, config: Config) -> str:
     fallback path if the LLM isn't usable. Always returns a string;
     never raises.
     """
-    if not is_llm_enabled(config):
+    try:
+        llm_on = is_llm_enabled(config)
+    except Exception:
+        # is_llm_enabled reads SQLite; a corrupt or locked DB shouldn't
+        # bubble up to the caller. Treat any read failure as "LLM off".
+        log.exception("%s: is_llm_enabled raised; using fallback", task.log_label)
+        return _safe_fallback(task)
+
+    if not llm_on:
         log.info("%s: LLM disabled; using fallback", task.log_label)
         return _safe_fallback(task)
 
-    backend = _resolve_backend(config)
-    prompt = task.prompt_builder()
+    try:
+        backend = _resolve_backend(config)
+        prompt = task.prompt_builder()
+    except Exception:
+        log.exception(
+            "%s: backend resolution or prompt build failed; using fallback",
+            task.log_label,
+        )
+        return _safe_fallback(task)
+
     result: LLMResult = await asyncio.to_thread(
         run_llm, backend, prompt, task.timeout, task.log_label
     )

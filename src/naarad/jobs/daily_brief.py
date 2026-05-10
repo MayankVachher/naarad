@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application
 
 from naarad import db
@@ -39,12 +40,10 @@ BRIEF_TIMEOUT = 600
 LAST_BRIEF_SETTING = "last_brief_on"
 
 
-def _start_day_keyboard() -> dict:
-    return {
-        "inline_keyboard": [[
-            {"text": "☀️ Start day", "callback_data": START_DAY_CALLBACK}
-        ]]
-    }
+def _start_day_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("☀️ Start day", callback_data=START_DAY_CALLBACK)
+    ]])
 
 
 async def run_brief(app: Application) -> int:
