@@ -40,6 +40,11 @@ class WaterState:
     level: int = 0
     last_msg_id: int | None = None
     day_started_on: date | None = None
+    # Set on apply_day_started; lets next_action apply a grace period
+    # (cfg.first_reminder_delay_minutes) before the first reminder fires
+    # on a freshly-started day. Survives bot restart so a crash mid-grace
+    # doesn't reset the timer.
+    chain_started_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -47,6 +52,9 @@ class WaterConfig:
     active_end: time            # e.g. time(21, 0)
     intervals_minutes: tuple[int, ...]  # e.g. (120, 60, 30, 15, 5)
     tz: ZoneInfo
+    # How long to wait between tapping [Start day] and the first
+    # reminder of the day. Lets the user finish brushing teeth, etc.
+    first_reminder_delay_minutes: int = 5
 
 
 # --- Action types ---
@@ -123,7 +131,18 @@ def next_action(state: WaterState, now: datetime, cfg: WaterConfig) -> Action:
 
     anchor = _select_anchor(state)
     if anchor is None:
-        # day_started but nothing recorded yet -> fire first reminder NOW.
+        # day_started but no drink/reminder yet — apply the first-of-day
+        # grace period so the bot waits while the user finishes their
+        # morning routine before nudging.
+        if state.chain_started_at is not None:
+            grace_due = state.chain_started_at + timedelta(
+                minutes=cfg.first_reminder_delay_minutes
+            )
+            if grace_due >= end_today:
+                return Idle()
+            if grace_due > now:
+                return Sleep(grace_due)
+        # chain_started_at unset (legacy state pre-v4) → fire now.
         return Reminder(level=state.level)
 
     next_due = anchor + _interval_for(cfg, state.level)
@@ -140,14 +159,18 @@ def next_action(state: WaterState, now: datetime, cfg: WaterConfig) -> Action:
 
 # --- State transitions ---
 
-def apply_day_started(state: WaterState, today: date) -> WaterState:
-    """Morning Start fired (via tap or fallback): reset chain for the new day."""
+def apply_day_started(state: WaterState, today: date, now: datetime) -> WaterState:
+    """Morning Start fired (via tap or fallback): reset chain for the
+    new day and stamp ``chain_started_at`` so next_action can apply the
+    first-reminder grace period.
+    """
     return replace(
         state,
         day_started_on=today,
         last_drink_at=None,
         last_reminder_at=None,
         level=0,
+        chain_started_at=now,
     )
 
 

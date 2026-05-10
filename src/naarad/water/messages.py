@@ -20,4 +20,9 @@ def reminder_text(level: int) -> str:
     return _TONES[min(level, len(_TONES) - 1)]
 
 
+# Sent as the very first reminder of the day, after the start-day grace
+# window expires. Different from the level-0 nudge because the user has
+# just woken up — no escalation, no urgency, just a friendly opener.
+FIRST_OF_DAY_MESSAGE = "💧 Morning. First sip when you're ready."
+
 CONFIRM_RESPONSE = "💧 Logged. Next nudge in 2h."

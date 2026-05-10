@@ -16,7 +16,7 @@ from contextlib import contextmanager
 from datetime import date, datetime
 from pathlib import Path
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 def _to_iso_dt(value: datetime | None) -> str | None:
@@ -115,7 +115,8 @@ def init_db(db_path: str | Path, seed_tickers: list[str] | None = None) -> None:
                     "  level                    INTEGER NOT NULL DEFAULT 0,"
                     "  last_msg_id              INTEGER,"
                     "  day_started_on           TEXT,"
-                    "  start_button_message_id  INTEGER"
+                    "  start_button_message_id  INTEGER,"
+                    "  chain_started_at         TEXT"
                     ")"
                 )
                 conn.execute(
@@ -162,6 +163,22 @@ def init_db(db_path: str | Path, seed_tickers: list[str] | None = None) -> None:
                 conn.execute("UPDATE schema_version SET version = ?", (3,))
             current = 3
 
+        if current < 4:
+            # v3 -> v4: add chain_started_at column. Records the timestamp
+            # of the most recent start_day call so the first reminder can
+            # apply a grace period (default 5 min) instead of firing
+            # immediately.
+            with _transaction(conn):
+                cols = {
+                    r["name"] for r in conn.execute("PRAGMA table_info(water_state)")
+                }
+                if "chain_started_at" not in cols:
+                    conn.execute(
+                        "ALTER TABLE water_state ADD COLUMN chain_started_at TEXT"
+                    )
+                conn.execute("UPDATE schema_version SET version = ?", (4,))
+            current = 4
+
         if seed_tickers:
             existing = {r["symbol"] for r in conn.execute("SELECT symbol FROM tickers")}
             if not existing:
@@ -206,11 +223,14 @@ def remove_ticker(db_path: str | Path, symbol: str) -> bool:
 
 # ---------- Water state ----------
 
+_DT_FIELDS = ("last_drink_at", "last_reminder_at", "chain_started_at")
+
+
 def get_water_state(db_path: str | Path) -> dict:
     with connect(db_path) as conn:
         row = conn.execute(
             "SELECT last_drink_at, last_reminder_at, level, last_msg_id, "
-            "       day_started_on, start_button_message_id "
+            "       day_started_on, start_button_message_id, chain_started_at "
             "FROM water_state WHERE id = 1"
         ).fetchone()
     if row is None:
@@ -221,6 +241,7 @@ def get_water_state(db_path: str | Path) -> dict:
             "last_msg_id": None,
             "day_started_on": None,
             "start_button_message_id": None,
+            "chain_started_at": None,
         }
     return {
         "last_drink_at": _from_iso_dt(row["last_drink_at"]),
@@ -229,6 +250,7 @@ def get_water_state(db_path: str | Path) -> dict:
         "last_msg_id": row["last_msg_id"],
         "day_started_on": _from_iso_date(row["day_started_on"]),
         "start_button_message_id": row["start_button_message_id"],
+        "chain_started_at": _from_iso_dt(row["chain_started_at"]),
     }
 
 
@@ -246,6 +268,7 @@ def update_water_state(db_path: str | Path, **fields) -> None:
         "last_msg_id",
         "day_started_on",
         "start_button_message_id",
+        "chain_started_at",
     }
     bad = set(fields) - allowed
     if bad:
@@ -253,7 +276,7 @@ def update_water_state(db_path: str | Path, **fields) -> None:
 
     serialized: dict[str, object] = {}
     for k, v in fields.items():
-        if k in ("last_drink_at", "last_reminder_at"):
+        if k in _DT_FIELDS:
             serialized[k] = _to_iso_dt(v)  # type: ignore[arg-type]
         elif k == "day_started_on":
             serialized[k] = _to_iso_date(v)  # type: ignore[arg-type]

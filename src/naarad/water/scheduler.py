@@ -39,7 +39,11 @@ from naarad import db
 from naarad.config import Config
 from naarad.llm import LLMTask, render
 from naarad.water import messages
-from naarad.water.prompt import build_water_prompt, first_nonempty_line
+from naarad.water.prompt import (
+    build_first_of_day_prompt,
+    build_water_prompt,
+    first_nonempty_line,
+)
 from naarad.water.state import (
     Idle,
     Reminder,
@@ -65,6 +69,7 @@ def water_config_from(config: Config) -> WaterConfig:
         active_end=config.water.active_end_time,
         intervals_minutes=tuple(config.water.intervals_minutes),
         tz=config.tz,
+        first_reminder_delay_minutes=config.water.first_reminder_delay_minutes,
     )
 
 
@@ -76,6 +81,7 @@ def _state_from_db(config: Config) -> WaterState:
         level=raw["level"],
         last_msg_id=raw["last_msg_id"],
         day_started_on=raw["day_started_on"],
+        chain_started_at=raw["chain_started_at"],
     )
 
 
@@ -85,21 +91,34 @@ def _confirm_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-async def _render_reminder_text(config: Config, level: int) -> str:
+async def _render_reminder_text(
+    config: Config, level: int, *, first_of_day: bool = False
+) -> str:
     """Generate the line for a reminder at this level. May call the LLM —
     deliberately not under any lock so a slow subprocess can't block
     concurrent confirms.
+
+    ``first_of_day=True`` selects the warmer welcome-back variant used
+    for the very first reminder after Start day fires.
     """
-    fallback = messages.reminder_text(level)
+    if first_of_day:
+        fallback = messages.FIRST_OF_DAY_MESSAGE
+        prompt_builder = build_first_of_day_prompt
+        log_label = "water-reminder-first"
+    else:
+        fallback = messages.reminder_text(level)
+        prompt_builder = lambda: build_water_prompt(level)  # noqa: E731
+        log_label = "water-reminder"
+
     return await render(
         LLMTask(
-            prompt_builder=lambda: build_water_prompt(level),
+            prompt_builder=prompt_builder,
             # If the LLM drifts to multi-line, take the first non-empty
             # line; if the LLM somehow returns blank, fall back too.
             post_process=lambda raw: first_nonempty_line(raw) or fallback,
             fallback=lambda: fallback,
             timeout=WATER_REMINDER_TIMEOUT,
-            log_label="water-reminder",
+            log_label=log_label,
         ),
         config,
     )
@@ -155,12 +174,20 @@ async def run_loop(app: Application) -> None:
                 _schedule_at(app, action.until)
                 return
 
-            # Reminder: capture the level, then drop the lock for the render.
+            # Reminder: capture the level + first-of-day flag, then drop
+            # the lock for the (possibly slow) render. "First of day" =
+            # the chain just started and no reminder/drink has fired yet,
+            # i.e. anchor is None and chain_started_at is set.
             assert isinstance(action, Reminder)
             level = action.level
+            first_of_day = (
+                state.last_drink_at is None
+                and state.last_reminder_at is None
+                and state.chain_started_at is not None
+            )
 
         # ---- Phase 2: render (lock released) --------------------------------
-        text = await _render_reminder_text(config, level)
+        text = await _render_reminder_text(config, level, first_of_day=first_of_day)
 
         # ---- Phase 3: re-check + send + persist -----------------------------
         async with lock:
@@ -237,16 +264,18 @@ async def start_day(app: Application) -> None:
     config: Config = app.bot_data["config"]
     lock: asyncio.Lock = app.bot_data["water_lock"]
     async with lock:
-        today = _now(config.tz).date()
+        now = _now(config.tz)
+        today = now.date()
         state = _state_from_db(config)
         if state.day_started_on != today:
-            new_state = apply_day_started(state, today)
+            new_state = apply_day_started(state, today, now)
             db.update_water_state(
                 config.db_path,
                 day_started_on=new_state.day_started_on,
                 last_drink_at=None,
                 last_reminder_at=None,
                 level=0,
+                chain_started_at=new_state.chain_started_at,
             )
     # Lock released — run_loop will reacquire per transition.
     await run_loop(app)

@@ -8,7 +8,7 @@ A single-user Telegram bot. Runs on a Raspberry Pi (or your laptop):
 
 - 👋 **First-boot welcome** — on the very first run with a fresh `state.db`, the bot sends a single welcome message echoing your config (timezone, schedules, water intervals, LLM backend, watchlist) plus a `[👋 Start day]` button and an `LLM check` line. The check line updates a few seconds later with ✓ and a one-liner from the model, or ✗ + the reason if the LLM isn't reachable — so misconfig surfaces immediately instead of tomorrow morning. Subsequent boots skip the welcome.
 - 🌅 **Daily brief** at 06:00 — silent send with a `[☀️ Start day]` button. Tapping it greets you and starts the water reminder chain. If you sleep in, an auto-fallback fires at 11:00. If the bot was offline at 06:00 and comes up before `water.active_end`, a catch-up brief fires shortly after boot. After bedtime there's no catch-up — tomorrow's normal schedule handles it. The brief itself is rendered by the configured LLM CLI (Copilot or Claude) from pre-fetched RSS / weather / sun-times / Wikipedia data (see `src/naarad/brief/`).
-- 💧 **Water reminders** during waking hours, escalating in interval and tone if ignored. Each reminder line is freshly written by Copilot CLI with a hardcoded fallback. Tap the button (or reply, or `/water`) to confirm — the reminder rewrites itself to "✅ Logged at HH:MM".
+- 💧 **Water reminders** during waking hours, escalating in interval and tone if ignored. The first reminder of the day waits ~5 min after you tap [Start day] (configurable via `water.first_reminder_delay_minutes`) so you can finish brushing teeth or your morning routine before getting nudged — and uses a gentler welcome-back opener. Subsequent reminders escalate normally. Tap the button (or reply, or `/water`) to confirm — the reminder rewrites itself to "✅ Logged at HH:MM".
 - 📈 **Market open / close snapshots** at 09:35 ET and 16:05 ET on weekdays — per-symbol bullet block with price, previous close, change %, and a 🟢/🔴/⚪ status dot. Per-exchange holiday handling (US + TSX); a closed exchange is acknowledged with a single line and its quotes are skipped. `/quote SYMBOL` for on-demand pulls.
 
 ## Architecture
@@ -112,6 +112,7 @@ Everything lives in `config.json` (gitignored). See `config.example.json` for th
 | `timezone` | IANA timezone for water + morning schedules |
 | `water.active_end` | After this, no reminders until next morning |
 | `water.intervals_minutes` | Escalation curve |
+| `water.first_reminder_delay_minutes` | Grace between [Start day] and the first reminder (default 5) |
 | `brief.location_*` | City / lat / lon for the weather + sunrise lookup |
 | `morning.start_time` | When the daily brief is generated (default 06:00) |
 | `morning.fallback_time` | Auto-start the water chain by this time if you haven't tapped Start (default 11:00) |

@@ -153,18 +153,62 @@ def test_apply_day_started_resets_state():
         level=3,
         last_msg_id=99,
     )
-    after = apply_day_started(state, date(2026, 5, 2))
+    started_at = at(2026, 5, 2, 8, 30)
+    after = apply_day_started(state, date(2026, 5, 2), started_at)
     assert after.day_started_on == date(2026, 5, 2)
     assert after.last_drink_at is None
     assert after.last_reminder_at is None
     assert after.level == 0
     # last_msg_id is preserved (not reset by day start).
     assert after.last_msg_id == 99
+    # chain_started_at stamped so the grace period can be applied.
+    assert after.chain_started_at == started_at
 
 
-def test_after_apply_day_started_first_reminder_fires():
-    """Sequencing test: apply_day_started -> next_action -> Reminder(0)."""
-    state = apply_day_started(WaterState(), date(2026, 5, 2))
+def test_after_apply_day_started_first_reminder_waits_for_grace():
+    """Sequencing test: apply_day_started → next_action → Sleep(now+grace),
+    not immediate Reminder. After the grace expires it fires."""
+    started_at = at(2026, 5, 2, 8, 30)
+    state = apply_day_started(WaterState(), date(2026, 5, 2), started_at)
+
+    # During grace: Sleep, not Reminder.
+    action = next_action(state, at(2026, 5, 2, 8, 31), CFG)
+    assert action == Sleep(at(2026, 5, 2, 8, 35))  # 8:30 + 5 min default
+
+    # After grace: Reminder fires at level 0.
+    action = next_action(state, at(2026, 5, 2, 8, 35), CFG)
+    assert action == Reminder(level=0)
+
+
+def test_grace_period_yields_idle_if_it_overlaps_active_end():
+    """If the grace would push the first reminder past active_end (21:00)
+    we go Idle — let tomorrow handle it."""
+    # User taps Start at 20:58, default 5min grace → would land 21:03,
+    # past active_end. Expected: Idle.
+    started_at = at(2026, 5, 2, 20, 58)
+    state = apply_day_started(WaterState(), date(2026, 5, 2), started_at)
+    action = next_action(state, at(2026, 5, 2, 20, 59), CFG)
+    assert isinstance(action, Idle)
+
+
+def test_grace_zero_fires_immediately():
+    """first_reminder_delay_minutes=0 disables the grace — immediate Reminder."""
+    cfg_nograce = WaterConfig(
+        active_end=time(21, 0),
+        intervals_minutes=(120, 60, 30, 15, 5),
+        tz=TZ,
+        first_reminder_delay_minutes=0,
+    )
+    started_at = at(2026, 5, 2, 8, 30)
+    state = apply_day_started(WaterState(), date(2026, 5, 2), started_at)
+    action = next_action(state, started_at, cfg_nograce)
+    assert action == Reminder(level=0)
+
+
+def test_legacy_state_without_chain_started_at_fires_immediately():
+    """Pre-v4 state (chain_started_at unset) takes the legacy path:
+    fire immediately. No half-state where the user is permanently stuck."""
+    state = WaterState(day_started_on=date(2026, 5, 2), chain_started_at=None)
     action = next_action(state, at(2026, 5, 2, 8, 30), CFG)
     assert action == Reminder(level=0)
 

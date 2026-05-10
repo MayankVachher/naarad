@@ -77,12 +77,23 @@ class TickersConfig(BaseModel):
 class WaterConfig(BaseModel):
     active_end: str = "21:00"
     intervals_minutes: list[int] = Field(default_factory=lambda: [120, 60, 30, 15, 5])
+    # Grace period between [Start day] and the first reminder of the
+    # day. Default 5 min — enough to brush teeth or finish a quick
+    # morning routine before getting nudged.
+    first_reminder_delay_minutes: int = 5
 
     @field_validator("intervals_minutes")
     @classmethod
     def _intervals_nonempty(cls, v: list[int]) -> list[int]:
         if not v or any(i <= 0 for i in v):
             raise ValueError("intervals_minutes must be a non-empty list of positive ints")
+        return v
+
+    @field_validator("first_reminder_delay_minutes")
+    @classmethod
+    def _grace_nonneg(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("first_reminder_delay_minutes must be ≥ 0")
         return v
 
     @property

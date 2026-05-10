@@ -147,43 +147,68 @@ async def test_kickoff_when_yesterday_started_is_idle(app, freeze_now):
 # ---------- start_day: marks today and fires first reminder ----------
 
 @pytest.mark.asyncio
-async def test_start_day_marks_today_and_fires_first_reminder(app, freeze_now):
+async def test_start_day_marks_today_and_schedules_grace(app, freeze_now):
+    """Tap Start at 08:30 → no reminder fires immediately, water-loop is
+    parked at 08:35 (default grace = 5 min). chain_started_at is persisted
+    so a bot restart mid-grace doesn't reset the timer."""
     cfg = app.bot_data["config"]
     freeze_now["now"] = datetime(2026, 5, 2, 8, 30, tzinfo=TZ)
     await water_scheduler.start_day(app)
 
-    # day_started_on persisted.
     state = db.get_water_state(cfg.db_path)
     assert state["day_started_on"] == date(2026, 5, 2)
+    assert state["chain_started_at"] == datetime(2026, 5, 2, 8, 30, tzinfo=TZ)
+    # Level still 0 — no reminder has fired yet.
+    assert state["level"] == 0
 
-    # First reminder (level 0) sent.
-    reminders = [m for m in app.bot.sent if "💧" in m["text"]]
-    assert len(reminders) == 1
-    assert reminders[0]["text"].startswith("💧 Time")
+    # Nothing sent yet (grace in progress).
+    assert [m for m in app.bot.sent if "💧" in m["text"]] == []
 
-    # Level bumped to 1 in DB; next reminder scheduled at 8:30 + 60min = 9:30.
-    state = db.get_water_state(cfg.db_path)
-    assert state["level"] == 1
-    assert app.job_queue.scheduled
+    # Job parked at start + grace = 08:35.
     name, when = app.job_queue.scheduled[-1]
     assert name == water_scheduler.JOB_NAME
-    assert when == datetime(2026, 5, 2, 9, 30, tzinfo=TZ)
+    assert when == datetime(2026, 5, 2, 8, 35, tzinfo=TZ)
+
+
+@pytest.mark.asyncio
+async def test_first_reminder_fires_after_grace_expires(app, freeze_now):
+    """Advance time past the grace window and trip the loop — first
+    reminder should now fire and level bump to 1."""
+    cfg = app.bot_data["config"]
+    freeze_now["now"] = datetime(2026, 5, 2, 8, 30, tzinfo=TZ)
+    await water_scheduler.start_day(app)
+    app.bot.sent.clear()
+    app.job_queue.scheduled.clear()
+
+    # Time advances past the 5-min grace.
+    freeze_now["now"] = datetime(2026, 5, 2, 8, 35, tzinfo=TZ)
+    await water_scheduler.run_loop(app)
+
+    reminders = [m for m in app.bot.sent if "💧" in m["text"]]
+    assert len(reminders) == 1
+    state = db.get_water_state(cfg.db_path)
+    assert state["level"] == 1
+    # After level 0 fires, intervals[1] = 60min, so next due 09:35.
+    name, when = app.job_queue.scheduled[-1]
+    assert when == datetime(2026, 5, 2, 9, 35, tzinfo=TZ)
 
 
 @pytest.mark.asyncio
 async def test_start_day_idempotent_within_day(app, freeze_now):
-    """Calling start_day twice on the same day must NOT reset the chain back to
-    level 0 — the second call sees day_started_on==today and just continues.
-    """
+    """Calling start_day twice on the same day must NOT reset the chain
+    back to a fresh grace window — the second call sees
+    day_started_on==today and just continues."""
     cfg = app.bot_data["config"]
     freeze_now["now"] = datetime(2026, 5, 2, 8, 30, tzinfo=TZ)
     await water_scheduler.start_day(app)
-    # After the first start_day: level was bumped to 1 by the immediate Reminder(0).
+    # After the first start_day: still in grace, level 0.
     state_after_first = db.get_water_state(cfg.db_path)
-    assert state_after_first["level"] == 1
-    assert state_after_first["last_drink_at"] is None  # never drank
+    assert state_after_first["level"] == 0
+    assert state_after_first["last_drink_at"] is None
+    assert state_after_first["chain_started_at"] == datetime(2026, 5, 2, 8, 30, tzinfo=TZ)
 
-    # User confirms a drink, level resets to 0 with anchor=9:00.
+    # User confirms a drink (skips the rest of the chain — level resets,
+    # last_drink_at set).
     freeze_now["now"] = datetime(2026, 5, 2, 9, 0, tzinfo=TZ)
     await water_scheduler.confirm_drink(app)
     state_after_drink = db.get_water_state(cfg.db_path)
@@ -312,6 +337,51 @@ async def test_after_active_end_is_idle(app, freeze_now):
     assert app.job_queue.scheduled == []
 
 
+# ---------- First-of-day messaging ----------
+
+@pytest.mark.asyncio
+async def test_first_reminder_uses_first_of_day_fallback(app, freeze_now):
+    """The very first reminder of the day uses FIRST_OF_DAY_MESSAGE,
+    not the level-0 nudge — different opener after the morning routine."""
+    freeze_now["now"] = datetime(2026, 5, 2, 8, 30, tzinfo=TZ)
+    await water_scheduler.start_day(app)
+    app.bot.sent.clear()
+
+    # Trip the loop after grace.
+    freeze_now["now"] = datetime(2026, 5, 2, 8, 35, tzinfo=TZ)
+    await water_scheduler.run_loop(app)
+
+    text = app.bot.sent[-1]["text"]
+    # The hardcoded first-of-day fallback wins because the autouse
+    # fixture stubs out the LLM with a failure result.
+    assert text == "💧 Morning. First sip when you're ready."
+
+
+@pytest.mark.asyncio
+async def test_subsequent_reminder_uses_regular_level_messaging(app, freeze_now):
+    """After the first reminder fires, follow-up reminders use the
+    regular escalation copy, not the first-of-day variant."""
+    cfg = app.bot_data["config"]
+    freeze_now["now"] = datetime(2026, 5, 2, 8, 30, tzinfo=TZ)
+    await water_scheduler.start_day(app)
+
+    # First reminder fires after grace.
+    freeze_now["now"] = datetime(2026, 5, 2, 8, 35, tzinfo=TZ)
+    await water_scheduler.run_loop(app)
+    app.bot.sent.clear()
+
+    # Now state.last_reminder_at is set; trip the loop again at the
+    # next-due time. Should use regular level-1 messaging.
+    state = db.get_water_state(cfg.db_path)
+    assert state["level"] == 1
+    freeze_now["now"] = datetime(2026, 5, 2, 9, 35, tzinfo=TZ)
+    await water_scheduler.run_loop(app)
+
+    text = app.bot.sent[-1]["text"]
+    assert text != "💧 Morning. First sip when you're ready."
+    assert "💧" in text
+
+
 # ---------- Lock-drop semantics around render ----------
 
 @pytest.mark.asyncio
@@ -333,7 +403,7 @@ async def test_confirm_during_render_discards_rendered_line(
 
     # Simulate a slow render that confirms-mid-flight: when the renderer is
     # called, slip in a confirm before it returns.
-    async def _slow_render(config, level):
+    async def _slow_render(config, level, *, first_of_day=False):
         await water_scheduler.confirm_drink(app)
         return "💧 should-not-be-sent"
 
