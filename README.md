@@ -72,7 +72,13 @@ To pull updates: `git pull && uv sync && sudo systemctl restart naarad`.
 
 To remove: `./deploy/uninstall.sh` (or `./deploy/uninstall.fish`) — stops, disables, and removes the systemd unit. Repo, config, DB, and logs are left in place.
 
-**Running under a hardened account** (e.g. the `ai-agent` user from [pi-hardening](https://github.com/MayankVachher/pi-hardening)): use `deploy/naarad-hardened.service.template` instead of the default. It runs naarad as a sandboxed user with no sudo, no LAN, restricted home access, and `ReadWritePaths` punched only for the install dir and the LLM CLI's auth-token store. The template's leading comment has the exact `sed` substitution and install commands.
+**Running under a hardened account** (e.g. the `ai-agent` user from [pi-hardening](https://github.com/MayankVachher/pi-hardening)): from your main (sudo) user, in the install dir:
+
+```bash
+sudo bash deploy/install-hardened.sh    # or .fish
+```
+
+Prompts for the AI account name (default `ai-agent`), detects its home from `getent passwd`, reads the LLM backend from `config.json`, smoke-tests by running the bot as the AI user, and writes the systemd unit with `User=ai-agent` + a tight `ReadWritePaths` covering only the install dir and the LLM CLI's auth-token store. Phase 1 (clone, `uv sync`, `configure.py`, install the LLM CLI) must already have been done from inside an AI-account shell.
 
 <details>
 <summary>Manual install (no script)</summary>
