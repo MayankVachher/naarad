@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -18,10 +18,14 @@ from naarad.water.state import (
 )
 
 TZ = ZoneInfo("America/Toronto")
+# Default test config disables pace adjustment so the timing-sensitive
+# tests below can assert exact next_due values. Pace-specific tests
+# construct their own config with daily_target_glasses > 0.
 CFG = WaterConfig(
     active_end=time(21, 0),
     intervals_minutes=(120, 60, 30, 15, 5),
     tz=TZ,
+    daily_target_glasses=0,
 )
 
 
@@ -223,6 +227,106 @@ def test_legacy_state_without_chain_started_at_fires_immediately():
     state = WaterState(day_started_on=date(2026, 5, 2), chain_started_at=None)
     action = next_action(state, at(2026, 5, 2, 8, 30), CFG)
     assert action == Reminder(level=0)
+
+
+# ---------- Pace-adjusted intervals ----------
+
+_PACE_CFG = WaterConfig(
+    active_end=time(21, 0),
+    intervals_minutes=(120, 60, 30, 15, 5),
+    tz=TZ,
+    daily_target_glasses=8,
+    pace_floor=0.3,
+)
+
+
+def test_pace_unchanged_when_on_target():
+    """At hour 1 of a 15h window with target 8, expected ≈ 0.53 glasses.
+    1 glass logged → ahead of pace → base interval unchanged (2h)."""
+    state = WaterState(
+        day_started_on=date(2026, 5, 2),
+        chain_started_at=at(2026, 5, 2, 6, 0),
+        last_drink_at=at(2026, 5, 2, 7, 0),
+        level=0,
+        glasses_today=1,
+    )
+    action = next_action(state, at(2026, 5, 2, 7, 1), _PACE_CFG)
+    # Anchor 07:00 + base 120min = 09:00 unmodified.
+    assert action == Sleep(at(2026, 5, 2, 9, 0))
+
+
+def test_pace_tightens_when_behind():
+    """At hour 6 (12:00, chain started 06:00) target 8 → expected 3.2
+    glasses. 1 logged → deficit 2.2 → factor 1 - 2.2/8 = 0.725 → 87 min."""
+    state = WaterState(
+        day_started_on=date(2026, 5, 2),
+        chain_started_at=at(2026, 5, 2, 6, 0),
+        last_drink_at=at(2026, 5, 2, 11, 30),
+        level=0,
+        glasses_today=1,
+    )
+    action = next_action(state, at(2026, 5, 2, 12, 0), _PACE_CFG)
+    # Anchor 11:30 + 0.725 * 120min = 11:30 + 87min = 12:57.
+    assert isinstance(action, Sleep)
+    # Allow up to 1s rounding tolerance.
+    expected_due = at(2026, 5, 2, 11, 30) + timedelta(minutes=87)
+    assert abs((action.until - expected_due).total_seconds()) < 1
+
+
+def test_pace_floors_at_pace_floor():
+    """Far enough behind that the linear factor would go below pace_floor
+    (0.3). Floor kicks in — interval is 0.3 * base = 36 min."""
+    state = WaterState(
+        day_started_on=date(2026, 5, 2),
+        chain_started_at=at(2026, 5, 2, 6, 0),
+        last_drink_at=at(2026, 5, 2, 17, 0),
+        level=0,
+        glasses_today=0,  # ridiculous deficit (would be ~6.4 behind at 18:00)
+    )
+    # Check at 17:10 (before next_due of 17:36) so we see the Sleep,
+    # not an immediate Reminder.
+    action = next_action(state, at(2026, 5, 2, 17, 10), _PACE_CFG)
+    assert isinstance(action, Sleep)
+    # Anchor 17:00 + 0.3 * 120min = 17:36.
+    assert action.until == at(2026, 5, 2, 17, 36)
+
+
+def test_pace_disabled_when_target_zero():
+    cfg = WaterConfig(
+        active_end=time(21, 0),
+        intervals_minutes=(120, 60, 30, 15, 5),
+        tz=TZ,
+        daily_target_glasses=0,  # disabled
+        pace_floor=0.3,
+    )
+    state = WaterState(
+        day_started_on=date(2026, 5, 2),
+        chain_started_at=at(2026, 5, 2, 6, 0),
+        last_drink_at=at(2026, 5, 2, 17, 0),
+        level=0,
+        glasses_today=0,
+    )
+    action = next_action(state, at(2026, 5, 2, 18, 0), cfg)
+    # No pace adjustment — exact 2h interval.
+    assert action == Sleep(at(2026, 5, 2, 19, 0))
+
+
+def test_expected_glasses_now_linear():
+    from naarad.water.state import expected_glasses_now
+    state = WaterState(
+        day_started_on=date(2026, 5, 2),
+        chain_started_at=at(2026, 5, 2, 6, 0),
+    )
+    # Half-way through the 15h window → half the target (4 of 8).
+    halfway = at(2026, 5, 2, 13, 30)
+    assert abs(expected_glasses_now(state, halfway, _PACE_CFG) - 4.0) < 0.01
+
+    # Before chain started → 0.
+    assert expected_glasses_now(state, at(2026, 5, 2, 5, 0), _PACE_CFG) == 0.0
+
+    # After active_end → full target.
+    after_end = at(2026, 5, 2, 22, 0)
+    assert expected_glasses_now(state, after_end, _PACE_CFG) == 8.0
 
 
 # ---------- Naive datetime guard ----------

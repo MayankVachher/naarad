@@ -33,7 +33,10 @@ from naarad.water.scheduler import water_config_from
 TZ = ZoneInfo("America/Toronto")
 
 
-def make_config(db_path: Path) -> Config:
+def make_config(db_path: Path, *, daily_target: int = 0) -> Config:
+    """Default disables pace adjustment so timing-sensitive tests can
+    assert exact next_due values. Pace-specific tests pass daily_target=N.
+    """
     return Config(
         telegram=TelegramConfig(token="x", chat_id=1),
         eodhd=EodhdConfig(api_key="x"),
@@ -41,6 +44,7 @@ def make_config(db_path: Path) -> Config:
         water=ConfigWater(
             active_end="21:00",
             intervals_minutes=[120, 60, 30, 15, 5],
+            daily_target_glasses=daily_target,
         ),
         brief=BriefConfig(),
         morning=MorningConfig(),

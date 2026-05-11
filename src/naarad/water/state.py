@@ -59,6 +59,14 @@ class WaterConfig:
     # How long to wait between tapping [Start day] and the first
     # reminder of the day. Lets the user finish brushing teeth, etc.
     first_reminder_delay_minutes: int = 5
+    # Glass-count target for the day. Used by pace-adjusted intervals
+    # in next_action and the progress display in /status. Setting this
+    # to 0 disables pace adjustment.
+    daily_target_glasses: int = 8
+    # Minimum multiplier when behind pace — at most this fraction of
+    # the base interval, regardless of how far behind. 0.3 = a 120-min
+    # base becomes at most ~36 min.
+    pace_floor: float = 0.3
 
 
 # --- Action types ---
@@ -111,6 +119,54 @@ def _select_anchor(state: WaterState) -> datetime | None:
     return max(state.last_drink_at, state.last_reminder_at)
 
 
+def expected_glasses_now(
+    state: WaterState, now: datetime, cfg: WaterConfig
+) -> float:
+    """How many glasses we'd expect by ``now`` if the user were on
+    pace to hit ``daily_target_glasses`` evenly across the active
+    window (chain_started_at → active_end). Returns 0.0 if pace can't
+    be computed (target off, chain not started, after end, etc.).
+    """
+    if cfg.daily_target_glasses <= 0 or state.chain_started_at is None:
+        return 0.0
+    now = now.astimezone(cfg.tz)
+    end_today = _at(now.date(), cfg.active_end, cfg.tz)
+    chain_start = state.chain_started_at.astimezone(cfg.tz)
+    total = (end_today - chain_start).total_seconds()
+    if total <= 0:
+        return 0.0
+    elapsed = (now - chain_start).total_seconds()
+    if elapsed <= 0:
+        return 0.0
+    if elapsed >= total:
+        return float(cfg.daily_target_glasses)
+    return cfg.daily_target_glasses * (elapsed / total)
+
+
+def _pace_adjust(
+    base: timedelta, state: WaterState, now: datetime, cfg: WaterConfig
+) -> timedelta:
+    """Shorten ``base`` if the user is behind the day's glass-count
+    pace. Multiplier = ``max(pace_floor, 1 - deficit/target)``, so:
+
+    - on/ahead pace → no change
+    - behind by 1 of an 8-target day → multiplier 0.875 (12% tighter)
+    - behind by 4 → 0.5 (half interval)
+    - behind by 6+ → floored at pace_floor (default 0.3)
+    """
+    target = cfg.daily_target_glasses
+    if target <= 0:
+        return base
+    expected = expected_glasses_now(state, now, cfg)
+    if expected <= 0:
+        return base
+    deficit = expected - state.glasses_today
+    if deficit <= 0:
+        return base
+    factor = max(cfg.pace_floor, 1.0 - (deficit / target))
+    return base * factor
+
+
 # --- Core ---
 
 def next_action(state: WaterState, now: datetime, cfg: WaterConfig) -> Action:
@@ -149,7 +205,9 @@ def next_action(state: WaterState, now: datetime, cfg: WaterConfig) -> Action:
         # chain_started_at unset (legacy state pre-v4) → fire now.
         return Reminder(level=state.level)
 
-    next_due = anchor + _interval_for(cfg, state.level)
+    next_due = anchor + _pace_adjust(
+        _interval_for(cfg, state.level), state, now, cfg,
+    )
 
     if next_due >= end_today:
         # Would fall after bedtime; idle until tomorrow's start_day.

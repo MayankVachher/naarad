@@ -81,6 +81,17 @@ class WaterConfig(BaseModel):
     # day. Default 5 min — enough to brush teeth or finish a quick
     # morning routine before getting nudged.
     first_reminder_delay_minutes: int = 5
+    # Daily glass-count target. Used to (1) display "N / target" in
+    # /status and the confirm response, and (2) tighten reminder
+    # intervals when the user is behind pace (see pace_floor). Set to 0
+    # to disable pace adjustment entirely; the bot still counts glasses
+    # but won't tweak cadences.
+    daily_target_glasses: int = 8
+    # Minimum interval multiplier when behind pace. Reminders will fire
+    # at most this fraction of the base interval no matter how far
+    # behind the user is. Default 0.3 caps the squeeze at ~3× the
+    # normal cadence — e.g. a 120-min base becomes at most 36 min.
+    pace_floor: float = 0.3
 
     @field_validator("intervals_minutes")
     @classmethod
@@ -94,6 +105,20 @@ class WaterConfig(BaseModel):
     def _grace_nonneg(cls, v: int) -> int:
         if v < 0:
             raise ValueError("first_reminder_delay_minutes must be ≥ 0")
+        return v
+
+    @field_validator("daily_target_glasses")
+    @classmethod
+    def _target_nonneg(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("daily_target_glasses must be ≥ 0 (0 disables pace)")
+        return v
+
+    @field_validator("pace_floor")
+    @classmethod
+    def _pace_floor_in_range(cls, v: float) -> float:
+        if not (0.0 < v <= 1.0):
+            raise ValueError("pace_floor must be in (0, 1]")
         return v
 
     @property

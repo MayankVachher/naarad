@@ -10,7 +10,9 @@
   "water": {
     "active_end": "21:00",
     "intervals_minutes": [120, 60, 30, 15, 5],
-    "first_reminder_delay_minutes": 5
+    "first_reminder_delay_minutes": 5,
+    "daily_target_glasses": 8,
+    "pace_floor": 0.3
   },
   "brief": {
     "location_name": "Toronto",

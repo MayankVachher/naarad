@@ -11,7 +11,14 @@ from naarad.config import Config
 from naarad.handlers.auth import reject_unauthorized
 from naarad.runtime import is_llm_enabled, tickers_off_reason
 from naarad.water.scheduler import water_config_from
-from naarad.water.state import Idle, Reminder, Sleep, WaterState, next_action
+from naarad.water.state import (
+    Idle,
+    Reminder,
+    Sleep,
+    WaterState,
+    expected_glasses_now,
+    next_action,
+)
 
 HELP_TEXT = (
     "<b>Naarad commands</b>\n"
@@ -79,8 +86,26 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         level=raw["level"],
         last_msg_id=raw["last_msg_id"],
         day_started_on=raw["day_started_on"],
+        chain_started_at=raw["chain_started_at"],
+        glasses_today=raw["glasses_today"],
     )
-    next_str = _describe_next_action(next_action(state, now, water_config_from(config)))
+    wcfg = water_config_from(config)
+    next_str = _describe_next_action(next_action(state, now, wcfg))
+
+    target = config.water.daily_target_glasses
+    glasses = raw["glasses_today"]
+    if target > 0 and day_started:
+        expected = expected_glasses_now(state, now, wcfg)
+        deficit = expected - glasses
+        if deficit >= 1.0:
+            pace_note = f" — behind by ~{deficit:.1f} (intervals tightened)"
+        elif glasses >= target:
+            pace_note = " — target hit ✓"
+        else:
+            pace_note = " — on pace"
+        glasses_line = f"Glasses today: {glasses} / {target}{pace_note}"
+    else:
+        glasses_line = f"Glasses today: {glasses}"
 
     llm_state = "on" if is_llm_enabled(config, config.db_path) else "off"
     reason = tickers_off_reason(config, config.db_path)
@@ -94,7 +119,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await update.message.reply_text(
         f"<b>Naarad status</b>\n"
         f"Day started: {'yes' if day_started else 'no'}\n"
-        f"Glasses today: {raw['glasses_today']}\n"
+        f"{glasses_line}\n"
         f"Next reminder: {next_str}\n"
         f"Last drink: {last_str}\n"
         f"Water level: {raw['level']}\n"

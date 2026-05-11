@@ -70,6 +70,8 @@ def water_config_from(config: Config) -> WaterConfig:
         intervals_minutes=tuple(config.water.intervals_minutes),
         tz=config.tz,
         first_reminder_delay_minutes=config.water.first_reminder_delay_minutes,
+        daily_target_glasses=config.water.daily_target_glasses,
+        pace_floor=config.water.pace_floor,
     )
 
 
