@@ -82,11 +82,19 @@ echo
 read -p "  Proceed? (Y/n) " -n 1 -r ANS; echo
 [[ "${ANS:-Y}" =~ ^[Nn]$ ]] && fail "Aborted by user."
 
-# --- Helper: run a block as the AI user with their login env -------------
-# -H sets HOME; -i is a login shell (sources ~/.bashrc). stdin/stdout/stderr
-# pass through to the user's terminal so interactive prompts work.
+# --- Helper: run a block as the AI user with the right PATH --------------
+# Don't use `sudo -i` here: sudo's login-shell mode joins multi-line `-c`
+# arguments with spaces, which breaks multi-line bash blocks (the first
+# `then` lands on the same line as previous statements and bash chokes).
+# Instead use plain `-H` (set HOME from the target user's passwd entry)
+# and a wrapper that exports PATH ourselves before running the supplied
+# command. stdin/stdout/stderr still pass through to the user's terminal
+# so the device-code auth flows and configure.py prompts work.
 run_as_ai() {
-    sudo -u "$AI_USER" -H -i bash -c "$1"
+    sudo -u "$AI_USER" -H bash -c "
+export PATH=\"\$HOME/.local/bin:\$HOME/.npm-global/bin:/usr/local/bin:/usr/bin:/bin\"
+$1
+"
 }
 
 # --- Optional: install nodejs system-wide (needs sudo) -------------------
