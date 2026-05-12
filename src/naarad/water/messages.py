@@ -74,7 +74,7 @@ def pace_status(actual: int, expected: float, target: int) -> tuple[PaceStatus, 
 
 _PACE_BADGES: dict[PaceStatus, str] = {
     "target_hit": "🎯 target hit",
-    "on_track":   "✓ on track",
+    "on_track":   "🟢 on track",
     "at_risk":    "⚠️ at risk",
     "behind":     "🚨 behind",   # suffix gets appended with the deficit
 }

@@ -86,7 +86,7 @@ def _confirm_call(**overrides):
 def test_confirm_response_count_pace_and_time() -> None:
     out = _confirm_call()
     assert "💧 Glass #3/8 logged" in out
-    assert "✓ on track" in out
+    assert "🟢 on track" in out
     assert "Next reminder at 15:32" in out
 
 
@@ -95,7 +95,7 @@ def test_confirm_response_omits_target_when_pace_disabled() -> None:
     assert "Glass #3 logged" in out
     assert "/0" not in out
     # No badge when pace is unknown.
-    assert "✓" not in out
+    assert "🟢" not in out
     assert "🚨" not in out
 
 
