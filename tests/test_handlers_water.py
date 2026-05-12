@@ -102,7 +102,10 @@ async def test_water_command_replies_with_glass_count(tmp_path, monkeypatch):
     message.reply_text.assert_awaited_once()
     text = message.reply_text.await_args.args[0]
     assert "#1" in text
-    assert "2h" in text  # intervals_minutes[0] = 120 → "2h"
+    # Glass count formatted as #N/8 (default target).
+    assert "#1/8" in text
+    # Either a pace badge or the next-reminder time line.
+    assert "Next reminder at" in text or "No more reminders" in text
 
     # State reflects the increment.
     assert db.get_water_state(config.db_path)["glasses_today"] == 1

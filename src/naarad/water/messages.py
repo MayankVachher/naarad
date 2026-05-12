@@ -5,6 +5,7 @@ Level 0..3 are escalating in tone; level 4+ is the floor.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 _TONES = (
     "💧 Time for water",
@@ -42,13 +43,80 @@ def humanize_minutes(m: int) -> str:
     return f"{mins}m"
 
 
-def confirm_response(glasses_today: int, next_interval_minutes: int) -> str:
-    """The text sent back after /water, the 💧 button tap, or a reply
-    to a reminder. Includes the running glass count and the dynamically
-    formatted next-nudge interval (pulled from intervals_minutes[0]).
+PaceStatus = Literal["target_hit", "on_track", "at_risk", "behind", "unknown"]
+
+
+def pace_status(actual: int, expected: float, target: int) -> tuple[PaceStatus, float]:
+    """Classify the user's progress vs. expected pace.
+
+    Returns (status, deficit). ``deficit`` is ``expected - actual`` for
+    the "behind" / "at_risk" branches (always > 0 there); 0.0 otherwise.
+
+    Bands:
+      - ``target_hit``   → actual >= target
+      - ``on_track``     → at or ahead of pace
+      - ``at_risk``      → behind by less than 1 glass
+      - ``behind``       → behind by 1 glass or more
+      - ``unknown``      → target disabled or expected not yet meaningful
+                          (no chain_started_at, before active window, etc.)
     """
-    interval = humanize_minutes(next_interval_minutes)
-    return f"💧 Glass #{glasses_today} logged. Next nudge in {interval}."
+    if target <= 0 or expected <= 0:
+        return "unknown", 0.0
+    if actual >= target:
+        return "target_hit", 0.0
+    deficit = expected - actual
+    if deficit <= 0:
+        return "on_track", 0.0
+    if deficit < 1.0:
+        return "at_risk", deficit
+    return "behind", deficit
+
+
+_PACE_BADGES: dict[PaceStatus, str] = {
+    "target_hit": "🎯 target hit",
+    "on_track":   "✓ on track",
+    "at_risk":    "⚠️ at risk",
+    "behind":     "🚨 behind",   # suffix gets appended with the deficit
+}
+
+
+def confirm_response(
+    *,
+    glasses_today: int,
+    daily_target: int,
+    status: PaceStatus,
+    deficit: float,
+    next_reminder_at: datetime | None,
+) -> str:
+    """The text sent back after /water, the 💧 button tap, or a reply
+    to a reminder. Two lines:
+
+    1. ``💧 Glass #N/T logged · <pace badge>`` (or just ``Glass #N``
+       if pace tracking is disabled).
+    2. ``Next reminder at HH:MM.`` (or ``No more reminders today.``
+       when Idle through to tomorrow).
+    """
+    # Line 1: count + optional pace badge.
+    if daily_target > 0:
+        count = f"Glass #{glasses_today}/{daily_target}"
+    else:
+        count = f"Glass #{glasses_today}"
+    badge = _PACE_BADGES.get(status, "")
+    if status == "behind" and deficit > 0:
+        # Round to 0.1 glass for a readable hint; pluralize.
+        glasses_word = "glass" if deficit < 1.5 else "glasses"
+        badge = f"🚨 behind by ~{deficit:.1f} {glasses_word}"
+    line1 = f"💧 {count} logged"
+    if badge:
+        line1 = f"{line1} · {badge}"
+
+    # Line 2: next reminder.
+    if next_reminder_at is None:
+        line2 = "No more reminders today."
+    else:
+        line2 = f"Next reminder at {next_reminder_at.strftime('%H:%M')}."
+
+    return f"{line1}\n{line2}"
 
 
 def logged_edit_text(original: str, now: datetime, glasses_today: int) -> str:

@@ -18,14 +18,59 @@ from naarad import db
 from naarad.config import Config
 from naarad.handlers.auth import reject_unauthorized
 from naarad.water import messages, scheduler
+from naarad.water.scheduler import water_config_from
+from naarad.water.state import (
+    Reminder,
+    Sleep,
+    WaterState,
+    expected_glasses_now,
+    next_action,
+)
 
 log = logging.getLogger(__name__)
 
 
 def _confirm_response(config: Config, glasses_today: int) -> str:
+    """Build the post-confirm reply: count + pace badge + next reminder
+    time. Pulls everything it needs from the post-confirm state in DB.
+    """
+    raw = db.get_water_state(config.db_path)
+    state = WaterState(
+        last_drink_at=raw["last_drink_at"],
+        last_reminder_at=raw["last_reminder_at"],
+        level=raw["level"],
+        last_msg_id=raw["last_msg_id"],
+        day_started_on=raw["day_started_on"],
+        chain_started_at=raw["chain_started_at"],
+        glasses_today=raw["glasses_today"],
+    )
+    wcfg = water_config_from(config)
+    now = datetime.now(config.tz)
+
+    expected = expected_glasses_now(state, now, wcfg)
+    status, deficit = messages.pace_status(
+        glasses_today, expected, config.water.daily_target_glasses,
+    )
+
+    # Next reminder time: re-run next_action on the current post-confirm
+    # state. Sleep → use .until. Reminder → effectively "now" (rare —
+    # only if the next interval already elapsed, which shouldn't be the
+    # case right after a confirm). Idle → no more reminders today.
+    action = next_action(state, now, wcfg)
+    next_at: datetime | None
+    if isinstance(action, Sleep):
+        next_at = action.until
+    elif isinstance(action, Reminder):
+        next_at = now
+    else:
+        next_at = None
+
     return messages.confirm_response(
         glasses_today=glasses_today,
-        next_interval_minutes=config.water.intervals_minutes[0],
+        daily_target=config.water.daily_target_glasses,
+        status=status,
+        deficit=deficit,
+        next_reminder_at=next_at,
     )
 
 
