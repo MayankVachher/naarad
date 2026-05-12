@@ -65,7 +65,12 @@ ProtectHome=read-only
 # is also writable because both Copilot and Claude refresh auth tokens
 # during long-running sessions and need to persist them back. Keep this
 # narrow — DO NOT widen to all of @AI_HOME@; that defeats ProtectHome.
-ReadWritePaths=@INSTALL_DIR@ @LLM_CONFIG_DIR@
+# The leading `-` on @LLM_CONFIG_DIR@ makes it optional: systemd won't
+# refuse to start the unit if the path doesn't exist yet (e.g. the CLI
+# hasn't created its config dir on first auth, or you picked a backend
+# whose path differs from the default). It just won't be writable until
+# it exists, which the CLI handles by creating it lazily on first use.
+ReadWritePaths=@INSTALL_DIR@ -@LLM_CONFIG_DIR@
 ProtectKernelTunables=true
 ProtectControlGroups=true
 

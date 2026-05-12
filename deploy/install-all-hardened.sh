@@ -199,6 +199,15 @@ sed \
     -e "s|@INSTALL_DIR@|$INSTALL_DIR|g" \
     -e "s|@LLM_CONFIG_DIR@|$LLM_CONFIG_DIR|g" \
     "$TEMPLATE" > "$SERVICE_PATH"
+
+# No LLM installed → strip the LLM path from ReadWritePaths. With no
+# CLI in play there's nothing to refresh tokens, and leaving a missing
+# (or placeholder) path in ReadWritePaths would either crash systemd's
+# namespace setup (exit 226/NAMESPACE) or leave dead cruft in the unit.
+if [ "$BACKEND" = "none" ]; then
+    sed -i '/^ReadWritePaths=/s| -\?[^ ]*$||' "$SERVICE_PATH"
+fi
+
 chmod 644 "$SERVICE_PATH"
 info "wrote $SERVICE_PATH"
 
