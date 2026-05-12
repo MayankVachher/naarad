@@ -38,8 +38,15 @@ verify_round_trip() {
     fi
 
     local code token chat
-    code=$(tr -dc 'A-HJ-NP-Z2-9' < /dev/urandom | head -c 6)
-    code="${code:0:3}-${code:3:3}"
+    # `tr ... | head -c N` is a SIGPIPE trap under set -o pipefail —
+    # head closes the pipe, tr exits 141, script aborts silently.
+    # python's secrets module sidesteps the issue.
+    code=$(python3 -c "
+import secrets
+chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+c = ''.join(secrets.choice(chars) for _ in range(6))
+print(f'{c[:3]}-{c[3:]}')
+")
 
     token=$(python3 -c "import json; print(json.load(open('$config'))['telegram']['token'])")
     chat=$(python3 -c "import json; print(json.load(open('$config'))['telegram']['chat_id'])")

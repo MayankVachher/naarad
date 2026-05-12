@@ -23,8 +23,15 @@ function verify_round_trip --argument-names install_dir
         return 0
     end
 
-    set code (tr -dc 'A-HJ-NP-Z2-9' < /dev/urandom | head -c 6)
-    set code (string sub -l 3 $code)"-"(string sub -s 4 -l 3 $code)
+    # Use python's secrets module — tr|head triggers SIGPIPE that
+    # bash's pipefail catches silently. Fish doesn't have pipefail but
+    # we want symmetric behavior across both shells.
+    set code (python3 -c "
+import secrets
+chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+c = ''.join(secrets.choice(chars) for _ in range(6))
+print(f'{c[:3]}-{c[3:]}')
+")
 
     set token (python3 -c "import json; print(json.load(open('$config'))['telegram']['token'])")
     set chat (python3 -c "import json; print(json.load(open('$config'))['telegram']['chat_id'])")

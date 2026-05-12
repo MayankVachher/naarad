@@ -98,9 +98,18 @@ verify_round_trip() {
     fi
 
     local code token chat
-    # Exclude ambiguous chars (I/O/0/1/l). Format XXX-XXX.
-    code=$(tr -dc 'A-HJ-NP-Z2-9' < /dev/urandom | head -c 6)
-    code="${code:0:3}-${code:3:3}"
+    # Use python's secrets module to avoid SIGPIPE-on-pipefail issues
+    # that `tr -dc ... < /dev/urandom | head -c 6` hits silently —
+    # head closes its stdin once it has the bytes it needs, tr exits
+    # with 141, and `set -o pipefail` kills the whole install with no
+    # error message. python gets us a cryptographically random code
+    # in one process with no pipe dance.
+    code=$(python3 -c "
+import secrets
+chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+c = ''.join(secrets.choice(chars) for _ in range(6))
+print(f'{c[:3]}-{c[3:]}')
+")
 
     token=$(python3 -c "import json; print(json.load(open('$config'))['telegram']['token'])")
     chat=$(python3 -c "import json; print(json.load(open('$config'))['telegram']['chat_id'])")
