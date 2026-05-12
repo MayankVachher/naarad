@@ -191,6 +191,18 @@ def next_action(state: WaterState, now: datetime, cfg: WaterConfig) -> Action:
     if now >= end_today:
         return Idle()
 
+    # Target hit for the day: bot is done nudging, matches the
+    # "🎯 Target hit" badge on the confirm reply. The user can still
+    # log more glasses via /water if they want; tomorrow's start_day
+    # resets glasses_today and reminders resume. Skipped when pace
+    # tracking is disabled (target=0) — bot keeps fixed-cadence
+    # reminders in that mode.
+    if (
+        cfg.daily_target_glasses > 0
+        and state.glasses_today >= cfg.daily_target_glasses
+    ):
+        return Idle()
+
     anchor = _select_anchor(state)
     if anchor is None:
         # day_started but no drink/reminder yet — apply the first-of-day

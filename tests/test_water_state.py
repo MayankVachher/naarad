@@ -329,6 +329,63 @@ def test_expected_glasses_now_linear():
     assert expected_glasses_now(state, after_end, _PACE_CFG) == 8.0
 
 
+# ---------- Target-hit auto-idle ----------
+
+def test_target_hit_returns_idle():
+    """Once glasses_today >= daily_target_glasses, no more reminders."""
+    state = WaterState(
+        day_started_on=date(2026, 5, 2),
+        chain_started_at=at(2026, 5, 2, 6, 0),
+        last_drink_at=at(2026, 5, 2, 14, 0),
+        glasses_today=8,
+        level=0,
+    )
+    action = next_action(state, at(2026, 5, 2, 15, 0), _PACE_CFG)
+    assert isinstance(action, Idle)
+
+
+def test_target_overshoot_still_idle():
+    """Logging beyond target (over-drinking, double-tap) stays silent."""
+    state = WaterState(
+        day_started_on=date(2026, 5, 2),
+        chain_started_at=at(2026, 5, 2, 6, 0),
+        last_drink_at=at(2026, 5, 2, 14, 0),
+        glasses_today=11,
+        level=0,
+    )
+    action = next_action(state, at(2026, 5, 2, 15, 0), _PACE_CFG)
+    assert isinstance(action, Idle)
+
+
+def test_one_short_of_target_keeps_scheduling():
+    """Just below target → normal interval-based scheduling resumes."""
+    state = WaterState(
+        day_started_on=date(2026, 5, 2),
+        chain_started_at=at(2026, 5, 2, 6, 0),
+        last_drink_at=at(2026, 5, 2, 14, 0),
+        glasses_today=7,  # one short of 8
+        level=0,
+    )
+    action = next_action(state, at(2026, 5, 2, 14, 30), _PACE_CFG)
+    assert isinstance(action, Sleep)
+
+
+def test_target_disabled_keeps_nudging_indefinitely():
+    """When daily_target_glasses=0 (pace tracking off), the auto-stop
+    doesn't engage — bot keeps cadence regardless of count. Lets users
+    who want fixed-interval reminders opt out of the target-hit logic."""
+    # CFG (the default for state tests) has daily_target_glasses=0.
+    state = WaterState(
+        day_started_on=date(2026, 5, 2),
+        chain_started_at=at(2026, 5, 2, 6, 0),
+        last_drink_at=at(2026, 5, 2, 14, 0),
+        glasses_today=20,  # absurd count, target disabled
+        level=0,
+    )
+    action = next_action(state, at(2026, 5, 2, 14, 30), CFG)
+    assert isinstance(action, Sleep)
+
+
 # ---------- Naive datetime guard ----------
 
 def test_naive_datetime_rejected():
