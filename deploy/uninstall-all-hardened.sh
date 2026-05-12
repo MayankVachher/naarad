@@ -16,8 +16,6 @@
 #
 # Removes (with explicit y/N prompt):
 #   • uv binary + caches under the AI user's home
-#   • AS limit revert in /etc/security/limits.d/$AI_USER.conf
-#     (only offered if it's currently the 6 GB value set during install)
 #
 # Does NOT touch pi-hardening artifacts (the AI user account, iptables
 # rules, sudo deny, sshd DenyUsers, the /srv/$AI_USER directory).
@@ -110,19 +108,6 @@ if [ -n "$AI_HOME" ] && [ -d "$AI_HOME" ]; then
         else
             info "(kept uv in $AI_HOME)"
         fi
-    fi
-fi
-
-# --- Optional: revert pi-hardening AS limit -----------------------------
-LIMITS_FILE="/etc/security/limits.d/$AI_USER.conf"
-if [ -f "$LIMITS_FILE" ] && grep -qE "^$AI_USER\s+hard\s+as\s+6291456" "$LIMITS_FILE"; then
-    echo
-    read -p "  Revert AS limit (6 GB → 2 GB original) in $LIMITS_FILE? (y/N) " -n 1 -r LIMIT_ANS; echo
-    if [[ "${LIMIT_ANS:-N}" =~ ^[Yy]$ ]]; then
-        sed -i "s/^$AI_USER\s\+hard\s\+as\s\+.*/$AI_USER    hard    as          2097152/" "$LIMITS_FILE"
-        info "reverted AS limit to 2 GB"
-    else
-        info "(AS limit stays at current value)"
     fi
 fi
 
