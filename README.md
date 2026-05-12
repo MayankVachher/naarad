@@ -148,7 +148,7 @@ Everything lives in `config.json` (gitignored). See `config.example.json` for th
 | `/ticker list` | List tracked tickers |
 | `/ticker on\|off` | Runtime kill switch for market jobs + /quote |
 | `/quote SYMBOL` | On-demand real-time quote for a single symbol |
-| `/status` | Bot health: day-started, next reminder, last drink, level, LLM, tickers |
+| `/status` | Bot health, grouped into Water / LLM / Tickers / System sections (pace badge, idle reason, backend, watchlist, timezone) |
 | `/help` | Command reference |
 
 You can also confirm water by tapping the **💧 Drank water** button on any reminder, or by replying to a reminder with anything.
