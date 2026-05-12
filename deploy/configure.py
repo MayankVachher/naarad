@@ -130,6 +130,21 @@ def _extract_chat_ids(updates: list[dict]) -> list[int]:
     return chat_ids
 
 
+def _drain_updates(base: str, offset: int) -> None:
+    """Best-effort ack of all updates with id < ``offset`` so they
+    don't replay when the bot first polls. Without this, the /start
+    message you send for chat_id detection sits in Telegram's queue
+    and the bot's CommandHandler replies with its help text moments
+    after the welcome message — annoying first-install UX.
+    """
+    try:
+        httpx.get(f"{base}/getUpdates", params={"offset": offset}, timeout=5)
+    except Exception:
+        # Drain failure isn't worth aborting the install — the user will
+        # just see at most one stale message echo when the bot first runs.
+        pass
+
+
 def _get_updates(base: str, params: dict | None = None) -> list[dict]:
     try:
         resp = httpx.get(f"{base}/getUpdates", params=params or {}, timeout=10)
@@ -172,9 +187,10 @@ def fetch_chat_id(token: str) -> int:
     last_id = initial[-1]["update_id"] if initial else 0
 
     print()
-    print("Send any message to your bot from the chat you want it to use.")
-    print("(If you've never messaged it: open the bot in Telegram and tap")
-    print(" Start, or just send 'hello'.)")
+    print("Send your bot ANY plain message ('hi' works) from the chat you")
+    print("want it to use. Tip: avoid using Telegram's 'Start' button on a")
+    print("new bot — it sends /start, which queues a command that the bot")
+    print("will reply to with its help text on first run.")
     print()
     print(f"Polling Telegram for the next {POLL_ATTEMPTS * POLL_INTERVAL_S}s…")
 
@@ -182,6 +198,13 @@ def fetch_chat_id(token: str) -> int:
         updates = _get_updates(base, {"offset": last_id + 1, "timeout": 0})
         chat_ids = _extract_chat_ids(updates)
         if chat_ids:
+            # Acknowledge everything we've seen so the bot doesn't replay
+            # the chat_id-detection message (especially /start) when it
+            # first starts polling. Best-effort: if the drain fails the
+            # user just gets at most one stale message echo.
+            max_id = max(u["update_id"] for u in updates)
+            _drain_updates(base, max_id + 1)
+
             if len(chat_ids) == 1:
                 return chat_ids[0]
             print("Multiple chats detected; pick one:")
