@@ -86,8 +86,8 @@ def _confirm_call(**overrides):
 def test_confirm_response_count_pace_and_time() -> None:
     out = _confirm_call()
     assert "💧 Glass #3/8 logged" in out
-    assert "🟢 on track" in out
-    assert "Next reminder at 15:32" in out
+    assert "🟢 On track" in out
+    assert "⏰ Next reminder at 15:32" in out
 
 
 def test_confirm_response_omits_target_when_pace_disabled() -> None:
@@ -101,17 +101,17 @@ def test_confirm_response_omits_target_when_pace_disabled() -> None:
 
 def test_confirm_response_target_hit_badge() -> None:
     out = _confirm_call(glasses_today=8, status="target_hit")
-    assert "🎯 target hit" in out
+    assert "🎯 Target hit" in out
 
 
 def test_confirm_response_at_risk_badge() -> None:
     out = _confirm_call(status="at_risk", deficit=0.7)
-    assert "⚠️ at risk" in out
+    assert "⚠️ At risk" in out
 
 
 def test_confirm_response_behind_includes_deficit() -> None:
     out = _confirm_call(status="behind", deficit=2.3)
-    assert "behind" in out
+    assert "🚨 Behind by" in out
     assert "2.3" in out
     assert "glasses" in out  # plural for deficit >= 1.5
 
@@ -125,8 +125,23 @@ def test_confirm_response_behind_singular_for_small_deficit() -> None:
 
 def test_confirm_response_idle_says_no_more_reminders() -> None:
     out = _confirm_call(next_reminder_at=None)
-    assert "No more reminders today" in out
+    assert "🌙 No more reminders today" in out
     assert "Next reminder at" not in out
+
+
+def test_confirm_response_is_multi_line() -> None:
+    """One fact per line: count, optional pace badge, next reminder time."""
+    out = _confirm_call()
+    lines = out.split("\n")
+    # 3 lines when target>0: count, pace badge, next reminder time
+    assert len(lines) == 3
+    assert lines[0].startswith("💧")
+    assert lines[1].startswith("🟢")
+    assert lines[2].startswith("⏰")
+
+    # 2 lines when pace is disabled (no badge line)
+    out2 = _confirm_call(daily_target=0, status="unknown")
+    assert len(out2.split("\n")) == 2
 
 
 # ---- logged_edit_text -------------------------------------------------------

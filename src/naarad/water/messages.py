@@ -73,10 +73,10 @@ def pace_status(actual: int, expected: float, target: int) -> tuple[PaceStatus, 
 
 
 _PACE_BADGES: dict[PaceStatus, str] = {
-    "target_hit": "🎯 target hit",
-    "on_track":   "🟢 on track",
-    "at_risk":    "⚠️ at risk",
-    "behind":     "🚨 behind",   # suffix gets appended with the deficit
+    "target_hit": "🎯 Target hit",
+    "on_track":   "🟢 On track",
+    "at_risk":    "⚠️ At risk",
+    "behind":     "🚨 Behind",   # suffix gets appended with the deficit
 }
 
 
@@ -89,34 +89,34 @@ def confirm_response(
     next_reminder_at: datetime | None,
 ) -> str:
     """The text sent back after /water, the 💧 button tap, or a reply
-    to a reminder. Two lines:
+    to a reminder. Multi-line, one fact per line:
 
-    1. ``💧 Glass #N/T logged · <pace badge>`` (or just ``Glass #N``
-       if pace tracking is disabled).
-    2. ``Next reminder at HH:MM.`` (or ``No more reminders today.``
-       when Idle through to tomorrow).
+      💧 Glass #N/T logged
+      🟢 On track            (omitted when pace tracking is disabled)
+      ⏰ Next reminder at HH:MM    (or 🌙 No more reminders today.)
     """
-    # Line 1: count + optional pace badge.
+    # Line 1: count.
     if daily_target > 0:
         count = f"Glass #{glasses_today}/{daily_target}"
     else:
         count = f"Glass #{glasses_today}"
+    lines = [f"💧 {count} logged"]
+
+    # Line 2 (optional): pace badge.
     badge = _PACE_BADGES.get(status, "")
     if status == "behind" and deficit > 0:
-        # Round to 0.1 glass for a readable hint; pluralize.
         glasses_word = "glass" if deficit < 1.5 else "glasses"
-        badge = f"🚨 behind by ~{deficit:.1f} {glasses_word}"
-    line1 = f"💧 {count} logged"
+        badge = f"🚨 Behind by ~{deficit:.1f} {glasses_word}"
     if badge:
-        line1 = f"{line1} · {badge}"
+        lines.append(badge)
 
-    # Line 2: next reminder.
+    # Line 3: next reminder time, or end-of-day note.
     if next_reminder_at is None:
-        line2 = "No more reminders today."
+        lines.append("🌙 No more reminders today.")
     else:
-        line2 = f"Next reminder at {next_reminder_at.strftime('%H:%M')}."
+        lines.append(f"⏰ Next reminder at {next_reminder_at.strftime('%H:%M')}.")
 
-    return f"{line1}\n{line2}"
+    return "\n".join(lines)
 
 
 def logged_edit_text(original: str, now: datetime, glasses_today: int) -> str:
