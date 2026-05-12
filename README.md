@@ -72,13 +72,15 @@ To pull updates: `git pull && uv sync && sudo systemctl restart naarad`.
 
 To remove: `./deploy/uninstall.sh` (or `./deploy/uninstall.fish`) — stops, disables, and removes the systemd unit. Repo, config, DB, and logs are left in place.
 
-**Running under a hardened account** (e.g. the `ai-agent` user from [pi-hardening](https://github.com/MayankVachher/pi-hardening)): from your main (sudo) user, in the install dir:
+**Running under a hardened account** (e.g. the `ai-agent` user from [pi-hardening](https://github.com/MayankVachher/pi-hardening)) — single command, no shell switching:
 
 ```bash
-sudo bash deploy/install-hardened.sh    # or .fish
+sudo bash deploy/install-all-hardened.sh
 ```
 
-Prompts for the AI account name (default `ai-agent`), detects its home from `getent passwd`, reads the LLM backend from `config.json`, smoke-tests by running the bot as the AI user, and writes the systemd unit with `User=ai-agent` + a tight `ReadWritePaths` covering only the install dir and the LLM CLI's auth-token store. Phase 1 (clone, `uv sync`, `configure.py`, install the LLM CLI) must already have been done from inside an AI-account shell.
+Prompts upfront for the AI user, repo URL, and LLM backend. Then runs the whole flow: clones into `/srv/<ai_user>/naarad`, installs `uv` + deps as the AI user, installs and auths Copilot or Claude CLI inside the sandbox, runs `configure.py` for your token + chat_id, smoke-tests, and writes the hardened systemd unit (`User=<ai_user>`, tight `ReadWritePaths`, sandbox preserved). The interactive bits (device-code LLM auth, chat_id detection by you sending a message) pass through to your terminal because each AI-account command runs via `sudo -u <ai_user> -H -i bash -c …`.
+
+If you'd rather run the two phases manually (Phase 2 as the AI user, then Phase 3 to install the unit), `deploy/install-hardened.sh` does just Phase 3 — useful if you've already got the install dir set up and just want to (re)write the systemd unit.
 
 <details>
 <summary>Manual install (no script)</summary>
