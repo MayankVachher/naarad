@@ -23,6 +23,7 @@ from telegram.ext import Application, ContextTypes
 from naarad import db
 from naarad.config import Config
 from naarad.handlers.auth import reject_unauthorized
+from naarad.jobs.daily_brief import LAST_BRIEF_SETTING
 from naarad.llm.smoketest import run_smoketest
 from naarad.runtime import is_llm_enabled
 from naarad.water import scheduler as water_scheduler
@@ -90,6 +91,19 @@ async def maybe_send_welcome(app: Application) -> bool:
         db.set_setting(config.db_path, WELCOME_SENT_SETTING, "1")
     except Exception:
         log.exception("welcome: failed to persist welcome_sent marker")
+
+    # Also claim today's brief slot: the welcome IS today's intro, so a
+    # brief catch-up later in the same boot (or on a follow-up systemd
+    # start after the install-time smoke test) would just clutter the
+    # chat with a second [Start day] button. Setting last_brief_on tells
+    # morning.scheduler.kickoff "today's brief already happened, skip the
+    # catch-up." Tomorrow's scheduled brief still fires normally because
+    # last_brief_on will be yesterday's date by then.
+    today = datetime.now(config.tz).date()
+    try:
+        db.set_setting(config.db_path, LAST_BRIEF_SETTING, today.isoformat())
+    except Exception:
+        log.exception("welcome: failed to persist last_brief_on marker")
 
     if llm_on:
         # Fire-and-forget the smoke-test edit. The task wraps its own

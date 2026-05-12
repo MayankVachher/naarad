@@ -8,7 +8,50 @@ set SERVICE_PATH /etc/systemd/system/naarad.service
 
 function bold;  printf '\033[1m%s\033[0m\n' $argv; end
 function info;  printf '  %s\n' $argv; end
+function warn;  printf '\033[33m  %s\033[0m\n' $argv; end
 function fail;  printf '\033[31m✗ %s\033[0m\n' $argv >&2; exit 1; end
+
+# --- Helper: end-to-end verification with a code round-trip --------------
+# Generates a code, sends via the bot, prompts user to type back, deletes
+# on success. Skippable via NAARAD_SKIP_VERIFY=1.
+function verify_round_trip --argument-names install_dir
+    set config $install_dir/config.json
+    test -f $config; or fail "config.json missing at $config"
+
+    if test "$NAARAD_SKIP_VERIFY" = "1"
+        info "(skipped via NAARAD_SKIP_VERIFY=1)"
+        return 0
+    end
+
+    set code (tr -dc 'A-HJ-NP-Z2-9' < /dev/urandom | head -c 6)
+    set code (string sub -l 3 $code)"-"(string sub -s 4 -l 3 $code)
+
+    set token (python3 -c "import json; print(json.load(open('$config'))['telegram']['token'])")
+    set chat (python3 -c "import json; print(json.load(open('$config'))['telegram']['chat_id'])")
+
+    info "Sending code to your bot's chat..."
+    set resp (curl -fsS "https://api.telegram.org/bot$token/sendMessage" \
+        --data-urlencode "chat_id=$chat" \
+        --data-urlencode "text=🔐 Naarad install verification — type this in your terminal: $code")
+    or fail "Telegram sendMessage failed. Check the token, chat_id, and network."
+
+    set msg_id (echo $resp | python3 -c "import sys, json; print(json.load(sys.stdin)['result']['message_id'])")
+
+    echo
+    info "Open Telegram → your bot's chat to see the code."
+    for attempt in 1 2 3
+        read -P "  Code: " entered
+        if test "$entered" = "$code"
+            curl -fsS "https://api.telegram.org/bot$token/deleteMessage" \
+                --data-urlencode "chat_id=$chat" \
+                --data-urlencode "message_id=$msg_id" >/dev/null 2>&1; or true
+            info "✓ verified"
+            return 0
+        end
+        warn "mismatch — "(math 3 - $attempt)" attempt(s) left"
+    end
+    fail "Verification failed after 3 attempts. The message stays in chat so you can see what was sent."
+end
 
 # --- Sanity --------------------------------------------------------------
 test -f pyproject.toml; or fail "Run this from the naarad repo root."
@@ -44,15 +87,14 @@ if grep -q PUT_BOTFATHER_TOKEN_HERE config.json
 end
 info "present and chmod 600"
 
-# --- 4. Smoke test --------------------------------------------------------
-bold "4/6 smoke-test"
+# --- 4a. Smoke test (config validation, no Telegram) --------------------
+bold "4/6 smoke-test (config validation, no Telegram contact)"
 set LOG (mktemp)
-# Bot runs forever; let it spend a few seconds reaching validate_startup,
-# then look for the success line and kill it. timeout exits non-zero on
-# its own kill — fish doesn't auto-abort, so no "or true" needed.
-timeout 8 uv run python -m naarad.bot >$LOG 2>&1
+# NAARAD_SMOKE_TEST=1 makes the bot exit cleanly after validate_startup;
+# no polling, no welcome. timeout 10 is just a safety bound.
+NAARAD_SMOKE_TEST=1 timeout 10 uv run python -m naarad.bot >$LOG 2>&1
 if grep -q "startup validation passed" $LOG
-    info "passed (saw 'startup validation passed')"
+    info "passed"
     rm -f $LOG
 else
     printf '\n--- naarad output ---\n' >&2
@@ -60,6 +102,10 @@ else
     rm -f $LOG
     fail "smoke test did not see 'startup validation passed'. Fix the issue and re-run."
 end
+
+# --- 4b. Round-trip verification ----------------------------------------
+bold "verification (round-trip with Telegram)"
+verify_round_trip (pwd)
 
 # --- 5. systemd unit ------------------------------------------------------
 bold "5/6 systemd unit (sudo)"

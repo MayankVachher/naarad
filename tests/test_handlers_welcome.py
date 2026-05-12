@@ -30,6 +30,7 @@ from naarad.handlers.welcome import (
     maybe_send_welcome,
     welcome_button,
 )
+from naarad.jobs.daily_brief import LAST_BRIEF_SETTING
 from naarad.runtime import LLM_FLAG_KEY
 
 TZ = ZoneInfo("America/Toronto")
@@ -79,6 +80,23 @@ async def test_first_call_sends_welcome_and_persists_marker(tmp_path: Path) -> N
     assert "(disabled" in body
     # Marker persisted.
     assert db.get_setting(config.db_path, WELCOME_SENT_SETTING) == "1"
+
+
+@pytest.mark.asyncio
+async def test_first_call_claims_todays_brief_slot(tmp_path: Path) -> None:
+    """The welcome doubles as the day's intro, so it sets
+    LAST_BRIEF_SETTING=today — preventing brief catch-up from firing a
+    second [Start day]-bearing message on a follow-up boot."""
+    config = make_config(tmp_path, llm_enabled=False)
+    db.init_db(config.db_path)
+    app = make_app(config)
+
+    with patch("naarad.handlers.welcome.datetime") as m_dt:
+        m_dt.now.return_value = datetime(2026, 5, 12, 14, 0, tzinfo=TZ)
+        await maybe_send_welcome(app)
+
+    today_iso = "2026-05-12"
+    assert db.get_setting(config.db_path, LAST_BRIEF_SETTING) == today_iso
 
 
 @pytest.mark.asyncio

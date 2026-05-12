@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -127,7 +128,19 @@ def _configure_logging() -> None:
 def main() -> None:
     _configure_logging()
     config = load_config()
+    # build_application runs validate_startup before returning, so the
+    # "startup validation passed" log line is emitted here. Install
+    # scripts grep for it to confirm config is healthy.
     app = build_application(config)
+    # Smoke-test mode: exit cleanly after validation, before any
+    # Telegram contact happens. Install scripts set NAARAD_SMOKE_TEST=1
+    # so the bot doesn't actually start polling (which would otherwise
+    # fire the welcome message during install and cause the user to see
+    # duplicate [Start day] buttons when systemd later starts the bot
+    # for real).
+    if os.environ.get("NAARAD_SMOKE_TEST") == "1":
+        log.info("smoke test mode: exiting cleanly without polling")
+        return
     log.info("naarad starting; chat_id=%s tz=%s", config.telegram.chat_id, config.timezone)
     app.run_polling()
 

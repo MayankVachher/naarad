@@ -82,6 +82,58 @@ echo
 read -p "  Proceed? (Y/n) " -n 1 -r ANS; echo
 [[ "${ANS:-Y}" =~ ^[Nn]$ ]] && fail "Aborted by user."
 
+# --- Helper: end-to-end verification with a code round-trip --------------
+# Generates a short code, sends it to your Telegram chat via the bot,
+# prompts you to type it back, deletes the message on success. Proves
+# token + chat_id + your-chat-receives-it + you-can-interact-with-the
+# -terminal all in one step. Skippable via NAARAD_SKIP_VERIFY=1.
+verify_round_trip() {
+    local install_dir="$1"
+    local config="$install_dir/config.json"
+    [ -f "$config" ] || fail "config.json missing at $config"
+
+    if [ "${NAARAD_SKIP_VERIFY:-0}" = "1" ]; then
+        info "(skipped via NAARAD_SKIP_VERIFY=1)"
+        return 0
+    fi
+
+    local code token chat
+    # Exclude ambiguous chars (I/O/0/1/l). Format XXX-XXX.
+    code=$(tr -dc 'A-HJ-NP-Z2-9' < /dev/urandom | head -c 6)
+    code="${code:0:3}-${code:3:3}"
+
+    token=$(python3 -c "import json; print(json.load(open('$config'))['telegram']['token'])")
+    chat=$(python3 -c "import json; print(json.load(open('$config'))['telegram']['chat_id'])")
+
+    info "Sending code to your bot's chat..."
+    local resp
+    resp=$(curl -fsS "https://api.telegram.org/bot${token}/sendMessage" \
+        --data-urlencode "chat_id=${chat}" \
+        --data-urlencode "text=🔐 Naarad install verification — type this in your terminal: ${code}") \
+        || fail "Telegram sendMessage failed. Check the token, chat_id, and network."
+
+    local msg_id
+    msg_id=$(python3 -c "import sys, json; print(json.load(sys.stdin)['result']['message_id'])" <<<"$resp")
+
+    echo
+    info "Open Telegram → your bot's chat to see the code."
+    local attempt entered
+    for attempt in 1 2 3; do
+        read -p "  Code: " entered
+        if [ "$entered" = "$code" ]; then
+            # Clean up so the chat doesn't carry a stale verification message
+            curl -fsS "https://api.telegram.org/bot${token}/deleteMessage" \
+                --data-urlencode "chat_id=${chat}" \
+                --data-urlencode "message_id=${msg_id}" >/dev/null 2>&1 || true
+            info "✓ verified"
+            return 0
+        fi
+        warn "mismatch — $((3 - attempt)) attempt(s) left"
+    done
+    fail "Verification failed after 3 attempts. The message stays in chat so you can see what was sent."
+}
+
+
 # --- Helper: run a block as the AI user with the right PATH --------------
 # Don't use `sudo -i` here: sudo's login-shell mode joins multi-line `-c`
 # arguments with spaces, which breaks multi-line bash blocks (the first
@@ -174,18 +226,25 @@ bold "[2.4] configure.py — token + chat_id detection"
 info "Paste your BotFather token when asked, then send your bot any message."
 run_as_ai "cd $INSTALL_DIR && PATH=\$HOME/.local/bin:\$PATH uv run python deploy/configure.py"
 
-# --- Phase 2.5: smoke test ---------------------------------------------
-bold "[2.5] smoke-test (as $AI_USER, 8s)"
+# --- Phase 2.5: smoke test (config validation only — no Telegram) -------
+bold "[2.5] smoke-test (config validation, no Telegram contact)"
 LOG=$(mktemp)
 trap 'rm -f "$LOG"' EXIT
-run_as_ai "cd $INSTALL_DIR && timeout 8 \$HOME/.local/bin/uv run python -m naarad.bot" >"$LOG" 2>&1 || true
+# NAARAD_SMOKE_TEST=1 makes the bot exit cleanly after validate_startup,
+# so no welcome / polling happens. timeout 10s is just a safety bound;
+# the bot normally exits in ~2s.
+run_as_ai "cd $INSTALL_DIR && NAARAD_SMOKE_TEST=1 timeout 10 \$HOME/.local/bin/uv run python -m naarad.bot" >"$LOG" 2>&1 || true
 if grep -q "startup validation passed" "$LOG"; then
-    info "passed (saw 'startup validation passed')"
+    info "passed"
 else
     printf '\n--- naarad output ---\n' >&2
     cat "$LOG" >&2
     fail "smoke test did not see 'startup validation passed'."
 fi
+
+# --- Phase 2.6: round-trip verification ---------------------------------
+bold "[2.6] verification (round-trip with Telegram)"
+verify_round_trip "$INSTALL_DIR"
 
 # --- Phase 3: substitute + install systemd unit -------------------------
 bold "[3] systemd unit"
