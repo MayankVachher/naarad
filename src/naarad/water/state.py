@@ -56,9 +56,11 @@ class WaterConfig:
     active_end: time            # e.g. time(21, 0)
     intervals_minutes: tuple[int, ...]  # e.g. (120, 60, 30, 15, 5)
     tz: ZoneInfo
-    # How long to wait between tapping [Start day] and the first
-    # reminder of the day. Lets the user finish brushing teeth, etc.
-    first_reminder_delay_minutes: int = 5
+    # How long to wait between tapping the morning brief's [Start day]
+    # button and the first reminder of the day. Lets the user finish
+    # brushing teeth, etc. The welcome message's tap bypasses this
+    # entirely — you're actively at the bot. Default 3 min.
+    first_reminder_delay_minutes: int = 3
     # Glass-count target for the day. Used by pace-adjusted intervals
     # in next_action and the progress display in /status. Setting this
     # to 0 disables pace adjustment.

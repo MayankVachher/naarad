@@ -32,15 +32,16 @@ def build_water_prompt(level: int) -> str:
 FIRST_OF_DAY_PROMPT = """\
 Write ONE single-line water reminder for Mayank (warm tone, dry wit, Toronto-based engineer).
 
-This is the FIRST reminder of the day. Mayank tapped Start a few
-minutes ago — he's likely just done brushing teeth or finishing his
-morning routine. NOT an escalation; this is the gentle opener.
+This is the FIRST reminder of the day. He tapped Start a few moments
+ago — could be any time of day, do NOT assume morning. NOT an
+escalation; this is the gentle opener.
 
 Hard rules:
 - Output EXACTLY one line. Plain text. No markdown, no HTML.
 - Lead with one droplet emoji.
 - ≤10 words after the emoji.
 - Mildly welcoming, never naggy. Surprise him — don't say "Time for water".
+- Don't reference time of day (no "morning", "afternoon", "evening").
 - No quotes, no preamble, no explanation. Just the line itself.
 """
 

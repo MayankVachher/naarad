@@ -179,4 +179,8 @@ async def welcome_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         log.debug("welcome: button-strip failed", exc_info=True)
 
     if not db.is_day_started(config.db_path, today):
-        await water_scheduler.start_day(context.application)
+        # Welcome tap = user is actively here. Skip the brush-teeth
+        # grace window and fire the first reminder right away —
+        # otherwise tapping a "Start day" button and seeing nothing
+        # happen for several minutes feels broken.
+        await water_scheduler.start_day(context.application, skip_grace=True)

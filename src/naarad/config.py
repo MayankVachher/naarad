@@ -78,9 +78,11 @@ class WaterConfig(BaseModel):
     active_end: str = "21:00"
     intervals_minutes: list[int] = Field(default_factory=lambda: [120, 60, 30, 15, 5])
     # Grace period between [Start day] and the first reminder of the
-    # day. Default 5 min — enough to brush teeth or finish a quick
-    # morning routine before getting nudged.
-    first_reminder_delay_minutes: int = 5
+    # day, applied only to the morning brief's Start tap (where you've
+    # likely walked away to brush teeth). The welcome message's Start
+    # tap bypasses the grace entirely — you're actively at the bot.
+    # Default 3 min.
+    first_reminder_delay_minutes: int = 3
     # Daily glass-count target. Used to (1) display "N / target" in
     # /status and the confirm response, and (2) tighten reminder
     # intervals when the user is behind pace (see pace_floor). Set to 0

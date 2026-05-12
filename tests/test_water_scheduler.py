@@ -159,7 +159,7 @@ async def test_kickoff_when_yesterday_started_is_idle(app, freeze_now):
 @pytest.mark.asyncio
 async def test_start_day_marks_today_and_schedules_grace(app, freeze_now):
     """Tap Start at 08:30 → no reminder fires immediately, water-loop is
-    parked at 08:35 (default grace = 5 min). chain_started_at is persisted
+    parked at 08:33 (default grace = 3 min). chain_started_at is persisted
     so a bot restart mid-grace doesn't reset the timer."""
     cfg = app.bot_data["config"]
     freeze_now["now"] = datetime(2026, 5, 2, 8, 30, tzinfo=TZ)
@@ -174,10 +174,27 @@ async def test_start_day_marks_today_and_schedules_grace(app, freeze_now):
     # Nothing sent yet (grace in progress).
     assert [m for m in app.bot.sent if "💧" in m["text"]] == []
 
-    # Job parked at start + grace = 08:35.
+    # Job parked at start + grace = 08:33.
     name, when = app.job_queue.scheduled[-1]
     assert name == water_scheduler.JOB_NAME
-    assert when == datetime(2026, 5, 2, 8, 35, tzinfo=TZ)
+    assert when == datetime(2026, 5, 2, 8, 33, tzinfo=TZ)
+
+
+@pytest.mark.asyncio
+async def test_start_day_skip_grace_fires_immediately(app, freeze_now):
+    """skip_grace=True (used by welcome's [Start day] button) fires the
+    first reminder right away — no waiting around for a brush-teeth gap
+    the user doesn't need."""
+    cfg = app.bot_data["config"]
+    freeze_now["now"] = datetime(2026, 5, 2, 14, 0, tzinfo=TZ)
+    await water_scheduler.start_day(app, skip_grace=True)
+
+    # First reminder fired immediately, level bumped to 1.
+    reminders = [m for m in app.bot.sent if "💧" in m["text"]]
+    assert len(reminders) == 1
+    state = db.get_water_state(cfg.db_path)
+    assert state["level"] == 1
+    assert state["day_started_on"] == date(2026, 5, 2)
 
 
 @pytest.mark.asyncio
@@ -190,17 +207,17 @@ async def test_first_reminder_fires_after_grace_expires(app, freeze_now):
     app.bot.sent.clear()
     app.job_queue.scheduled.clear()
 
-    # Time advances past the 5-min grace.
-    freeze_now["now"] = datetime(2026, 5, 2, 8, 35, tzinfo=TZ)
+    # Time advances past the 3-min default grace.
+    freeze_now["now"] = datetime(2026, 5, 2, 8, 33, tzinfo=TZ)
     await water_scheduler.run_loop(app)
 
     reminders = [m for m in app.bot.sent if "💧" in m["text"]]
     assert len(reminders) == 1
     state = db.get_water_state(cfg.db_path)
     assert state["level"] == 1
-    # After level 0 fires, intervals[1] = 60min, so next due 09:35.
+    # After level 0 fires, intervals[1] = 60min, so next due 09:33.
     name, when = app.job_queue.scheduled[-1]
-    assert when == datetime(2026, 5, 2, 9, 35, tzinfo=TZ)
+    assert when == datetime(2026, 5, 2, 9, 33, tzinfo=TZ)
 
 
 @pytest.mark.asyncio
@@ -372,19 +389,19 @@ async def test_after_active_end_is_idle(app, freeze_now):
 @pytest.mark.asyncio
 async def test_first_reminder_uses_first_of_day_fallback(app, freeze_now):
     """The very first reminder of the day uses FIRST_OF_DAY_MESSAGE,
-    not the level-0 nudge — different opener after the morning routine."""
+    not the level-0 nudge — different opener after the start tap."""
     freeze_now["now"] = datetime(2026, 5, 2, 8, 30, tzinfo=TZ)
     await water_scheduler.start_day(app)
     app.bot.sent.clear()
 
-    # Trip the loop after grace.
-    freeze_now["now"] = datetime(2026, 5, 2, 8, 35, tzinfo=TZ)
+    # Trip the loop after the 3-min default grace.
+    freeze_now["now"] = datetime(2026, 5, 2, 8, 33, tzinfo=TZ)
     await water_scheduler.run_loop(app)
 
     text = app.bot.sent[-1]["text"]
     # The hardcoded first-of-day fallback wins because the autouse
     # fixture stubs out the LLM with a failure result.
-    assert text == "💧 Morning. First sip when you're ready."
+    assert text == "💧 First sip when you're ready."
 
 
 @pytest.mark.asyncio

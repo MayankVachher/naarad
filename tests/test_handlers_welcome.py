@@ -267,6 +267,9 @@ async def test_welcome_button_starts_day(tmp_path: Path) -> None:
     update.callback_query.answer.assert_awaited_once()
     update.callback_query.edit_message_reply_markup.assert_awaited_once()
     m_start.assert_awaited_once()
+    # The welcome button must skip the grace — user is actively at the
+    # bot when they tap it, no brush-teeth gap to bridge.
+    assert m_start.await_args.kwargs.get("skip_grace") is True
 
 
 @pytest.mark.asyncio

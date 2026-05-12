@@ -74,4 +74,7 @@ def test_reminder_text_level_0() -> None:
 
 def test_first_of_day_message_constant() -> None:
     assert FIRST_OF_DAY_MESSAGE.startswith("💧")
-    assert "Morning" in FIRST_OF_DAY_MESSAGE
+    assert "First sip" in FIRST_OF_DAY_MESSAGE
+    # Deliberately not time-of-day specific.
+    for stamp in ("Morning", "Afternoon", "Evening", "Night"):
+        assert stamp not in FIRST_OF_DAY_MESSAGE

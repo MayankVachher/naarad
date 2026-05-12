@@ -282,21 +282,40 @@ async def kickoff(app: Application) -> None:
     await run_loop(app)
 
 
-async def start_day(app: Application) -> None:
-    """Mark today as started and run the loop, which fires the first reminder.
+async def start_day(app: Application, *, skip_grace: bool = False) -> None:
+    """Mark today as started and run the loop, which fires the first
+    reminder.
 
-    Called by the Start button handler and by the 11 AM fallback job. Idempotent
-    if today is already started — second call sees day_started_on==today and
-    just continues whatever the chain is doing.
+    Called by the Start button handler (morning brief + welcome) and by
+    the 11 AM fallback job. Idempotent if today is already started —
+    second call sees day_started_on==today and just continues whatever
+    the chain is doing.
+
+    ``skip_grace=True`` makes the first reminder fire immediately
+    instead of waiting ``first_reminder_delay_minutes``. The welcome
+    message's button uses this because the user is actively at the bot
+    when they tap it — no brush-teeth-and-come-back gap to bridge.
+    The morning brief's Start uses the default (grace applies) because
+    a 06:00 tap typically means the user is starting their day routine.
     """
     config: Config = app.bot_data["config"]
+    wcfg: WaterConfig = app.bot_data["water_cfg"]
     lock: asyncio.Lock = app.bot_data["water_lock"]
     async with lock:
         now = _now(config.tz)
         today = now.date()
         state = _state_from_db(config)
         if state.day_started_on != today:
-            new_state = apply_day_started(state, today, now)
+            # When skipping the grace, anchor chain_started_at one
+            # minute past the grace window so next_action's "have we
+            # cleared the grace?" check returns True immediately and
+            # fires Reminder(0) on the first run_loop pass.
+            chain_start = now
+            if skip_grace:
+                chain_start = now - timedelta(
+                    minutes=wcfg.first_reminder_delay_minutes + 1
+                )
+            new_state = apply_day_started(state, today, chain_start)
             db.update_water_state(
                 config.db_path,
                 day_started_on=new_state.day_started_on,

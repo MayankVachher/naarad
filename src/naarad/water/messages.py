@@ -22,10 +22,12 @@ def reminder_text(level: int) -> str:
     return _TONES[min(level, len(_TONES) - 1)]
 
 
-# Sent as the very first reminder of the day, after the start-day grace
-# window expires. Different from the level-0 nudge because the user has
-# just woken up — no escalation, no urgency, just a friendly opener.
-FIRST_OF_DAY_MESSAGE = "💧 Morning. First sip when you're ready."
+# Sent as the very first reminder of a day (after grace, or immediately
+# if the user tapped the welcome button). Deliberately time-agnostic —
+# the chain might start at 06:00, mid-afternoon, or any time the user
+# installs the bot or wipes state.db; "Morning, …" would be jarringly
+# wrong half the time.
+FIRST_OF_DAY_MESSAGE = "💧 First sip when you're ready."
 
 
 def humanize_minutes(m: int) -> str:

@@ -187,12 +187,12 @@ def test_after_apply_day_started_first_reminder_waits_for_grace():
     started_at = at(2026, 5, 2, 8, 30)
     state = apply_day_started(WaterState(), date(2026, 5, 2), started_at)
 
-    # During grace: Sleep, not Reminder.
+    # During grace: Sleep, not Reminder. Default grace is 3 min.
     action = next_action(state, at(2026, 5, 2, 8, 31), CFG)
-    assert action == Sleep(at(2026, 5, 2, 8, 35))  # 8:30 + 5 min default
+    assert action == Sleep(at(2026, 5, 2, 8, 33))  # 8:30 + 3 min default
 
     # After grace: Reminder fires at level 0.
-    action = next_action(state, at(2026, 5, 2, 8, 35), CFG)
+    action = next_action(state, at(2026, 5, 2, 8, 33), CFG)
     assert action == Reminder(level=0)
 
 
