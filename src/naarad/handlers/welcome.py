@@ -33,24 +33,28 @@ log = logging.getLogger(__name__)
 WELCOME_SENT_SETTING = "welcome_sent"
 WELCOME_BUTTON_CALLBACK = "welcome:start"
 
-_LLM_LINE_PENDING = "LLM check: ⏳ pending…"
-_LLM_LINE_DISABLED = "LLM check: <i>(disabled in config)</i>"
+_LLM_LINE_PENDING = "🔍 <b>LLM check:</b> ⏳ pending…"
+_LLM_LINE_DISABLED = "🔍 <b>LLM check:</b> <i>(disabled in config)</i>"
 
 
 def _format_welcome(config: Config, llm_line: str) -> str:
     intervals = " → ".join(f"{m}m" for m in config.water.intervals_minutes)
-    tickers = ", ".join(config.tickers_default) or "(none configured)"
+    if config.tickers_default:
+        tickers_html = f"<b>{html.escape(', '.join(config.tickers_default))}</b>"
+    else:
+        tickers_html = "<i>(none configured)</i>"
+
     return (
         "👋 <b>Hello, I'm Naarad.</b>\n\n"
-        f"Running on <b>{html.escape(config.timezone)}</b>. "
-        f"Brief at <b>{html.escape(config.morning.start_time)}</b>. "
-        f"Water {html.escape(intervals)} (active until "
-        f"<b>{html.escape(config.water.active_end)}</b>). "
-        f"LLM: <b>{html.escape(config.llm.backend)}</b>. "
-        f"Tickers: <b>{html.escape(tickers)}</b>.\n\n"
+        f"• 🕐 Timezone: <b>{html.escape(config.timezone)}</b>\n"
+        f"• 🌅 Morning brief: <b>{html.escape(config.morning.start_time)}</b>\n"
+        f"• 💧 Water: <b>{html.escape(intervals)}</b>\n"
+        f"• 🌙 Active until: <b>{html.escape(config.water.active_end)}</b>\n"
+        f"• 🤖 LLM backend: <b>{html.escape(config.llm.backend)}</b>\n"
+        f"• 📈 Tickers: {tickers_html}\n\n"
         f"{llm_line}\n\n"
         "Tap below to start tracking now, or wait for tomorrow's "
-        f"{html.escape(config.morning.start_time)} brief."
+        f"<b>{html.escape(config.morning.start_time)}</b> brief."
     )
 
 
@@ -121,10 +125,10 @@ async def _run_smoketest_and_edit(app: Application, message_id: int) -> None:
         ok, output = False, f"{type(exc).__name__}: {exc}"
 
     if ok:
-        line = f"LLM check: ✓ <i>{html.escape(output)}</i>"
+        line = f"🔍 <b>LLM check:</b> ✓ <i>{html.escape(output)}</i>"
     else:
         line = (
-            f"LLM check: ✗ {html.escape(output)} "
+            f"🔍 <b>LLM check:</b> ✗ {html.escape(output)}\n"
             "<i>— falling back to deterministic mode</i>"
         )
 

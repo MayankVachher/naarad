@@ -179,7 +179,7 @@ async def test_smoketest_edit_appends_check_mark_on_success(
 
     app.bot.edit_message_text.assert_awaited_once()
     body = app.bot.edit_message_text.await_args.kwargs["text"]
-    assert "LLM check: ✓" in body
+    assert "LLM check:</b> ✓" in body
     assert "Hello world" in body
     # Button still attached because day not started.
     assert app.bot.edit_message_text.await_args.kwargs["reply_markup"] is not None
@@ -202,7 +202,7 @@ async def test_smoketest_edit_shows_failure_with_reason(
         await welcome_handlers._run_smoketest_and_edit(app, message_id=42)
 
     body = app.bot.edit_message_text.await_args.kwargs["text"]
-    assert "LLM check: ✗" in body
+    assert "LLM check:</b> ✗" in body
     assert "not authenticated" in body
     assert "deterministic mode" in body
 
