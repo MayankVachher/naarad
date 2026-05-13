@@ -119,6 +119,42 @@ def confirm_response(
     return "\n".join(lines)
 
 
+def status_response(
+    *,
+    glasses_today: int,
+    daily_target: int,
+    status: PaceStatus,
+    deficit: float,
+    next_reminder_at: datetime | None,
+    day_started: bool,
+) -> str:
+    """Snapshot returned by ``/water`` (no args). The action is offered
+    by the panel's inline button, so this text deliberately has no
+    "type /water log" hint — the button right below is the affordance.
+    """
+    if daily_target > 0:
+        count = f"{glasses_today}/{daily_target} today"
+    else:
+        count = f"{glasses_today} today"
+    lines = [f"💧 {count}"]
+
+    badge = _PACE_BADGES.get(status, "")
+    if status == "behind" and deficit > 0:
+        glasses_word = "glass" if deficit < 1.5 else "glasses"
+        badge = f"🚨 Behind by ~{deficit:.1f} {glasses_word}"
+    if badge:
+        lines.append(badge)
+
+    if not day_started:
+        lines.append("🌅 Day not started yet.")
+    elif next_reminder_at is None:
+        lines.append("🌙 No more reminders today.")
+    else:
+        lines.append(f"⏰ Next reminder at {next_reminder_at.strftime('%H:%M')}.")
+
+    return "\n".join(lines)
+
+
 def logged_edit_text(original: str, now: datetime, glasses_today: int) -> str:
     """Edit-on-reminder body: append a small italic line confirming the
     log and including the running glass count.

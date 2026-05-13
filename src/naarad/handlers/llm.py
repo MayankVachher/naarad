@@ -49,6 +49,7 @@ _CB_TEST = "llm:test"
 _CB_TOGGLE = "llm:toggle"
 _CB_BACKEND_MENU = "llm:backend_menu"
 _CB_BACKEND_SET = "llm:backend:"   # llm:backend:<name>
+_CB_BACK = "llm:back"              # return to the main panel
 
 USAGE = (
     "Usage:\n"
@@ -132,7 +133,9 @@ def _panel_keyboard(config: Config) -> InlineKeyboardMarkup | None:
 
 
 def _backend_menu_keyboard(config: Config) -> InlineKeyboardMarkup:
-    """[copilot] [claude] with a ✓ on the current effective backend."""
+    """[copilot] [claude] with a ✓ on the current effective backend, plus
+    a Back row to return to the main panel.
+    """
     current = get_llm_backend(config, config.db_path)
     row: list[InlineKeyboardButton] = []
     for name in sorted(BACKENDS):
@@ -140,7 +143,18 @@ def _backend_menu_keyboard(config: Config) -> InlineKeyboardMarkup:
         if name == current:
             label += " ✓"
         row.append(InlineKeyboardButton(label, callback_data=f"{_CB_BACKEND_SET}{name}"))
-    return InlineKeyboardMarkup([row])
+    return InlineKeyboardMarkup([
+        row,
+        [InlineKeyboardButton("⬅️ Back", callback_data=_CB_BACK)],
+    ])
+
+
+def _back_only_keyboard() -> InlineKeyboardMarkup:
+    """Single ⬅️ Back row — used for transient sub-states (test result)
+    where no other action makes sense."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⬅️ Back", callback_data=_CB_BACK)],
+    ])
 
 
 def _backend_menu_text(config: Config) -> str:
@@ -179,22 +193,49 @@ def _set_backend(config: Config, target: str) -> str:
     )
 
 
+def _format_test_result(ok: bool, output: str) -> str:
+    if ok:
+        return f"<b>LLM check ✓</b>\n<i>{html.escape(output)}</i>"
+    return f"<b>LLM check ✗</b>\n{html.escape(output)}"
+
+
 async def _run_test_command(reply_target: Message, config: Config) -> None:
-    """Send an ack and edit it with the smoke-test result. ``reply_target``
-    is whatever message we should reply to (text /llm test → the user's
-    message; callback Test button → the panel message itself).
+    """Text path: send an ack reply and edit it with the smoke-test result.
+    The ack is a fresh message so the user's typed /llm test stays in the
+    chat history above the result.
     """
     ack = await reply_target.reply_text("⏳ Testing LLM…")
     ok, output = await run_smoketest(config)
-    if ok:
-        text = f"<b>LLM check ✓</b>\n<i>{html.escape(output)}</i>"
-    else:
-        text = f"<b>LLM check ✗</b>\n{html.escape(output)}"
+    text = _format_test_result(ok, output)
     try:
         await ack.edit_text(text, parse_mode="HTML")
     except Exception:
         log.exception("/llm test: edit_text failed; sending fresh message")
         await reply_target.reply_text(text, parse_mode="HTML")
+
+
+async def _run_test_in_panel(panel_msg: Message, config: Config) -> None:
+    """Button path: run the smoke-test in place on the panel message so
+    the test result replaces the panel content without piling on new
+    messages. Trailing keyboard is ⬅️ Back only — no other action is
+    meaningful while looking at a result.
+    """
+    try:
+        await panel_msg.edit_text(
+            "⏳ Testing LLM…",
+            reply_markup=_back_only_keyboard(),
+        )
+    except Exception:
+        log.debug("test-in-panel: pre-edit failed", exc_info=True)
+    ok, output = await run_smoketest(config)
+    text = _format_test_result(ok, output)
+    try:
+        await panel_msg.edit_text(
+            text, parse_mode="HTML", reply_markup=_back_only_keyboard(),
+        )
+    except Exception:
+        log.exception("/llm test (panel): edit_text failed; sending fresh message")
+        await panel_msg.reply_text(text, parse_mode="HTML")
 
 
 # ---- text command -----------------------------------------------------------
@@ -298,7 +339,15 @@ async def llm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await query.answer()
 
     if data == _CB_TEST:
-        await _run_test_command(query.message, config)
+        await _run_test_in_panel(query.message, config)
+        return
+
+    if data == _CB_BACK:
+        await query.message.edit_text(
+            _format_state(config),
+            parse_mode="HTML",
+            reply_markup=_panel_keyboard(config),
+        )
         return
 
     if data == _CB_TOGGLE:

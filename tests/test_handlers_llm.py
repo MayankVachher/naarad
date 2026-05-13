@@ -373,6 +373,8 @@ async def test_backend_no_arg_renders_keyboard_with_both_backends(
     # Both backends present; the current one has a ✓.
     assert any("copilot" in lbl and "✓" in lbl for lbl in labels)
     assert any("claude" in lbl for lbl in labels)
+    # Back row so the user can return to the main panel without re-sending /llm.
+    assert any("Back" in lbl for lbl in labels)
 
 
 # ---- callback paths --------------------------------------------------------
@@ -415,6 +417,57 @@ async def test_callback_backend_set_blocked_when_floor_off(tmp_path: Path) -> No
 
     # Override must NOT have been written.
     assert db.get_setting(config.db_path, LLM_BACKEND_KEY) is None
+
+
+@pytest.mark.asyncio
+async def test_callback_test_edits_panel_in_place(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """Tapping 🧪 Test edits the panel message in place (placeholder →
+    result) with a single ⬅️ Back button. No new reply messages.
+    """
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    update = make_callback_update("llm:test")
+
+    async def _ok(config):
+        return True, "🌙 Online and slightly bored."
+    monkeypatch.setattr("naarad.handlers.llm.run_smoketest", _ok)
+
+    await llm_callback(update, make_context(config))
+
+    edits = update.callback_query.message.edit_text.await_args_list
+    assert len(edits) == 2  # "⏳ Testing LLM…" then the result
+    placeholder_text = edits[0].args[0]
+    assert "Testing" in placeholder_text
+    result_text = edits[1].args[0]
+    assert "✓" in result_text
+    assert "Online and slightly bored" in result_text
+    # Result keyboard is ⬅️ Back only.
+    labels = _kb_button_texts(edits[1].kwargs.get("reply_markup"))
+    assert labels == ["⬅️ Back"]
+    # No fresh reply messages — the result replaces the panel.
+    update.callback_query.message.reply_text.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_callback_back_restores_panel(tmp_path: Path) -> None:
+    """Tapping ⬅️ Back re-renders the main panel (state line + the three
+    action buttons) in place.
+    """
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    update = make_callback_update("llm:back")
+
+    await llm_callback(update, make_context(config))
+
+    update.callback_query.message.edit_text.assert_awaited_once()
+    args, kwargs = update.callback_query.message.edit_text.await_args
+    assert "LLM" in args[0]
+    labels = _kb_button_texts(kwargs.get("reply_markup"))
+    assert any("Test" in lbl for lbl in labels)
+    assert any("Switch backend" in lbl for lbl in labels)
+    assert any("Disable" in lbl or "Enable" in lbl for lbl in labels)
 
 
 @pytest.mark.asyncio

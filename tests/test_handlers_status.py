@@ -22,7 +22,7 @@ from naarad.config import (
     TickersConfig,
     WaterConfig,
 )
-from naarad.handlers.status import status_command
+from naarad.handlers.status import status_callback, status_command
 from naarad.runtime import LLM_FLAG_KEY, TICKERS_FLAG_KEY
 
 TZ = ZoneInfo("America/Toronto")
@@ -293,3 +293,70 @@ async def test_tickers_empty_watchlist_shows_placeholder(tmp_path: Path) -> None
     await status_command(update, make_context(config))
     text = _reply(update)
     assert "<i>(none)</i>" in text
+
+
+# ---- refresh button --------------------------------------------------------
+
+def _kb_button_texts(markup):
+    if markup is None:
+        return []
+    return [btn.text for row in markup.inline_keyboard for btn in row]
+
+
+@pytest.mark.asyncio
+async def test_status_panel_includes_refresh_button(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    update = make_update()
+
+    await status_command(update, make_context(config))
+
+    markup = update.message.reply_text.await_args.kwargs.get("reply_markup")
+    labels = _kb_button_texts(markup)
+    assert any("Refresh" in lbl for lbl in labels)
+
+
+@pytest.mark.asyncio
+async def test_status_refresh_callback_edits_in_place(tmp_path: Path) -> None:
+    """Tap [🔄 Refresh] → edit the dashboard message in place with a
+    freshly-computed status text and the same keyboard.
+    """
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+
+    query = AsyncMock()
+    query.data = "status:refresh"
+    query.message = AsyncMock()
+    update = SimpleNamespace(
+        effective_chat=SimpleNamespace(id=42),
+        message=None,
+        callback_query=query,
+    )
+
+    await status_callback(update, make_context(config))
+
+    query.message.edit_text.assert_awaited_once()
+    text = query.message.edit_text.await_args.args[0]
+    assert "<b>📋 Naarad status</b>" in text
+    markup = query.message.edit_text.await_args.kwargs.get("reply_markup")
+    labels = _kb_button_texts(markup)
+    assert any("Refresh" in lbl for lbl in labels)
+
+
+@pytest.mark.asyncio
+async def test_status_refresh_callback_unauthorized_dropped(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+
+    query = AsyncMock()
+    query.data = "status:refresh"
+    query.message = AsyncMock()
+    update = SimpleNamespace(
+        effective_chat=SimpleNamespace(id=999),  # not config.telegram.chat_id
+        message=None,
+        callback_query=query,
+    )
+
+    await status_callback(update, make_context(config))
+
+    query.message.edit_text.assert_not_awaited()

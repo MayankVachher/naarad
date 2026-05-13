@@ -1,76 +1,72 @@
-"""Handlers for water-confirm events: /water, the inline button, and replies.
+"""Handlers for water-confirm events: /water log, the reminder button,
+the panel button, and replies.
 
-Each path does three things in order:
+Confirm paths (reminder button, /water log, reply-to-reminder) do three
+things:
 1. Apply the confirm via ``scheduler.confirm_drink`` (state mutation +
    reschedule). Returns the new glass count for the day.
 2. Edit the prior reminder (if known) to show "✅ Glass #N logged at HH:MM".
 3. Reply with the confirm response (which also includes the count).
+
+``/water`` with no args renders a status panel with a single
+``[💧 Log glass]`` button. Tapping it confirms a glass and edits the
+panel in place with the refreshed status — same "panel mutates under
+your tap" pattern as ``/llm``.
 """
 from __future__ import annotations
 
 import logging
 from datetime import datetime
 
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from naarad import db
 from naarad.config import Config
 from naarad.handlers.auth import reject_unauthorized
 from naarad.water import messages, scheduler
-from naarad.water.scheduler import water_config_from
-from naarad.water.state import (
-    Reminder,
-    Sleep,
-    WaterState,
-    expected_glasses_now,
-    next_action,
-)
+from naarad.water.status import compute_water_status
+
+PANEL_LOG_CALLBACK = "water:panel_log"
+
+
+def _panel_keyboard() -> InlineKeyboardMarkup:
+    """Single-button keyboard for the /water status panel."""
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("💧 Log glass", callback_data=PANEL_LOG_CALLBACK)]]
+    )
 
 log = logging.getLogger(__name__)
 
 
-def _confirm_response(config: Config, glasses_today: int) -> str:
+def _confirm_response(config: Config) -> str:
     """Build the post-confirm reply: count + pace badge + next reminder
-    time. Pulls everything it needs from the post-confirm state in DB.
+    time. Derived from the shared post-confirm view; ``confirm_drink``
+    has already committed the new glass count, so re-reading state here
+    is correct.
     """
-    raw = db.get_water_state(config.db_path)
-    state = WaterState(
-        last_drink_at=raw["last_drink_at"],
-        last_reminder_at=raw["last_reminder_at"],
-        level=raw["level"],
-        last_msg_id=raw["last_msg_id"],
-        day_started_on=raw["day_started_on"],
-        chain_started_at=raw["chain_started_at"],
-        glasses_today=raw["glasses_today"],
-    )
-    wcfg = water_config_from(config)
-    now = datetime.now(config.tz)
-
-    expected = expected_glasses_now(state, now, wcfg)
-    status, deficit = messages.pace_status(
-        glasses_today, expected, config.water.daily_target_glasses,
-    )
-
-    # Next reminder time: re-run next_action on the current post-confirm
-    # state. Sleep → use .until. Reminder → effectively "now" (rare —
-    # only if the next interval already elapsed, which shouldn't be the
-    # case right after a confirm). Idle → no more reminders today.
-    action = next_action(state, now, wcfg)
-    next_at: datetime | None
-    if isinstance(action, Sleep):
-        next_at = action.until
-    elif isinstance(action, Reminder):
-        next_at = now
-    else:
-        next_at = None
-
+    view = compute_water_status(config)
     return messages.confirm_response(
-        glasses_today=glasses_today,
-        daily_target=config.water.daily_target_glasses,
-        status=status,
-        deficit=deficit,
-        next_reminder_at=next_at,
+        glasses_today=view.glasses,
+        daily_target=view.daily_target,
+        status=view.pace_status,
+        deficit=view.pace_deficit,
+        next_reminder_at=view.next_reminder_at,
+    )
+
+
+def _status_response(config: Config) -> str:
+    """Build the read-only /water reply: same shape as the confirm reply
+    but without mutating state and with a hint about /water log.
+    """
+    view = compute_water_status(config)
+    return messages.status_response(
+        glasses_today=view.glasses,
+        daily_target=view.daily_target,
+        status=view.pace_status,
+        deficit=view.pace_deficit,
+        next_reminder_at=view.next_reminder_at,
+        day_started=view.day_started,
     )
 
 
@@ -110,6 +106,19 @@ async def water_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if await reject_unauthorized(update, context):
         return
     config: Config = context.application.bot_data["config"]
+
+    # /water (no args) is read-only — status snapshot only. Logging takes
+    # the explicit `/water log` form so a quick "where am I at" check
+    # can't accidentally reset the chain.
+    args = context.args or []
+    if not args or args[0].lower() != "log":
+        if update.message is not None:
+            await update.message.reply_text(
+                _status_response(config),
+                reply_markup=_panel_keyboard(),
+            )
+        return
+
     now = datetime.now(config.tz)
 
     # Snapshot last_msg_id BEFORE confirm so we know which reminder to
@@ -124,7 +133,7 @@ async def water_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             context, config.telegram.chat_id, last_msg_id, None, now, glasses,
         )
     if update.message is not None:
-        await update.message.reply_text(_confirm_response(config, glasses))
+        await update.message.reply_text(_confirm_response(config))
 
 
 async def water_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -150,6 +159,48 @@ async def water_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             query.message.text,
             now,
             glasses,
+        )
+        # Follow-up reply with the multi-line confirm response (count +
+        # pace badge + next reminder), matching /water log and the
+        # reply-to-reminder path. Without this, button taps surface only
+        # the inline "✅ Glass #N logged at HH:MM" edit and hide pace info.
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text=_confirm_response(config),
+        )
+
+
+async def water_panel_log(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Callback for the [💧 Log glass] button on the /water status panel.
+
+    Unlike ``water_button`` (the reminder-message button), this path
+    edits the panel itself in place with the refreshed status instead
+    of editing a reminder + sending a follow-up reply — the panel is
+    the surface the user is looking at, so feedback belongs there.
+    """
+    query = update.callback_query
+    if query is None or query.message is None:
+        return
+    if await reject_unauthorized(update, context):
+        return
+    try:
+        await query.answer()
+    except Exception:
+        log.debug("query.answer failed (likely stale tap)", exc_info=True)
+    config: Config = context.application.bot_data["config"]
+
+    await scheduler.confirm_drink(context.application)
+
+    try:
+        await query.message.edit_text(
+            _status_response(config),
+            reply_markup=_panel_keyboard(),
+        )
+    except Exception:
+        log.exception("water panel-log: edit_text failed; sending fresh panel")
+        await query.message.reply_text(
+            _status_response(config),
+            reply_markup=_panel_keyboard(),
         )
 
 
@@ -179,4 +230,4 @@ async def water_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         now,
         glasses,
     )
-    await msg.reply_text(_confirm_response(config, glasses))
+    await msg.reply_text(_confirm_response(config))

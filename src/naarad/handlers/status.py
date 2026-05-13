@@ -2,29 +2,36 @@
 from __future__ import annotations
 
 import html
-from datetime import datetime
+import logging
 
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from naarad import db
 from naarad.config import Config
 from naarad.handlers.auth import reject_unauthorized
 from naarad.runtime import get_llm_backend, is_llm_enabled, tickers_off_reason
-from naarad.water.messages import pace_status
-from naarad.water.scheduler import water_config_from
-from naarad.water.state import (
-    Idle,
-    Reminder,
-    Sleep,
-    WaterState,
-    expected_glasses_now,
-    next_action,
-)
+from naarad.water.state import Idle, Reminder, Sleep
+from naarad.water.status import compute_water_status
+
+log = logging.getLogger(__name__)
+
+STATUS_CALLBACK_PREFIX = "status:"
+_CB_REFRESH = "status:refresh"
+
+
+def _panel_keyboard() -> InlineKeyboardMarkup:
+    """Refresh-only keyboard for the /status dashboard. The dashboard is
+    read-only, so the single useful action is "recompute and re-render"
+    without having to re-type /status.
+    """
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("🔄 Refresh", callback_data=_CB_REFRESH)]]
+    )
 
 HELP_TEXT = (
     "<b>Naarad commands</b>\n"
-    "/water — confirm you drank water (resets the chain)\n"
+    "/water — water status panel with a [💧 Log glass] button\n"
     "/brief — re-run today's morning brief on demand\n"
     "/llm on|off|test|backend — toggle, smoke-test, or swap backend at runtime\n"
     "/ticker add|remove|list|on|off — manage the watchlist + kill switch\n"
@@ -36,8 +43,9 @@ HELP_TEXT = (
     "• 06:00 — silent morning brief drops with a [☀️ Start day] button.\n"
     "• Tap Start (or wait until 11:00 for the auto-fallback) to kick off "
     "the water reminder chain.\n"
-    "• Confirm water by tapping the 💧 button on a reminder, replying to "
-    "it with anything, or sending /water.\n"
+    "• Log a glass by tapping 💧 on a reminder, tapping [💧 Log glass] on "
+    "the /water panel, replying to a reminder with anything, or sending "
+    "/water log.\n"
     "\n"
     "<b>Tickers</b>\n"
     "• 09:35 ET market_open + 16:05 ET market_close briefs Mon-Fri.\n"
@@ -77,63 +85,39 @@ def _describe_next_action(
     return "unknown"
 
 
-async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if await reject_unauthorized(update, context):
-        return
-    if update.message is None:
-        return
-    config: Config = context.application.bot_data["config"]
-    raw = db.get_water_state(config.db_path)
+def _format_status(config: Config) -> str:
+    """Build the full /status dashboard text. Shared by the command path
+    and the Refresh callback so both render the same content.
+    """
     tickers = db.list_tickers(config.db_path)
+    view = compute_water_status(config)
 
-    now = datetime.now(config.tz)
-    today = now.date()
-    day_started = raw["day_started_on"] == today
-
-    state = WaterState(
-        last_drink_at=raw["last_drink_at"],
-        last_reminder_at=raw["last_reminder_at"],
-        level=raw["level"],
-        last_msg_id=raw["last_msg_id"],
-        day_started_on=raw["day_started_on"],
-        chain_started_at=raw["chain_started_at"],
-        glasses_today=raw["glasses_today"],
-    )
-    wcfg = water_config_from(config)
-
-    target = config.water.daily_target_glasses
-    glasses = raw["glasses_today"]
-    target_hit = target > 0 and glasses >= target
-    active_end_today = datetime.combine(today, wcfg.active_end, tzinfo=config.tz)
-    past_active_end = now >= active_end_today
     next_str = _describe_next_action(
-        next_action(state, now, wcfg),
-        day_started=day_started,
-        target_hit=target_hit,
-        past_active_end=past_active_end,
+        view.action,
+        day_started=view.day_started,
+        target_hit=view.target_hit,
+        past_active_end=view.past_active_end,
     )
 
     # Pace badge — shares vocabulary with the confirm reply so /status
     # and the post-log message read the same.
-    if target > 0 and day_started:
-        expected = expected_glasses_now(state, now, wcfg)
-        pstatus, deficit = pace_status(glasses, expected, target)
+    if view.daily_target > 0 and view.day_started:
         badge = {
             "target_hit": "🎯 target hit",
             "on_track":   "🟢 on track",
             "at_risk":    "⚠️ at risk",
             "behind":     "🚨 behind",
             "unknown":    "",
-        }[pstatus]
-        if pstatus == "behind" and deficit > 0:
-            unit = "glass" if deficit < 1.5 else "glasses"
-            badge = f"🚨 behind by ~{deficit:.1f} {unit}"
-        progress = f"<b>{glasses} / {target}</b>"
+        }[view.pace_status]
+        if view.pace_status == "behind" and view.pace_deficit > 0:
+            unit = "glass" if view.pace_deficit < 1.5 else "glasses"
+            badge = f"🚨 behind by ~{view.pace_deficit:.1f} {unit}"
+        progress = f"<b>{view.glasses} / {view.daily_target}</b>"
         glasses_line = f"{progress} — {badge}" if badge else progress
     else:
-        glasses_line = f"<b>{glasses}</b>"
+        glasses_line = f"<b>{view.glasses}</b>"
 
-    last = raw["last_drink_at"]
+    last = view.last_drink_at
     last_str = (
         last.astimezone(config.tz).strftime("%H:%M %Z (%Y-%m-%d)") if last else "never"
     )
@@ -167,14 +151,14 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     else:
         watchlist_block = "• Watchlist: <i>(none)</i>"
 
-    text = (
+    return (
         "<b>📋 Naarad status</b>\n"
         "\n"
         "<b>💧 Water</b>\n"
-        f"• Day started: <b>{'yes' if day_started else 'no'}</b>\n"
+        f"• Day started: <b>{'yes' if view.day_started else 'no'}</b>\n"
         f"• Glasses today: {glasses_line}\n"
         f"• Last drink: <b>{html.escape(last_str)}</b>\n"
-        f"• Level: <b>{raw['level']}</b>\n"
+        f"• Level: <b>{view.level}</b>\n"
         f"• Next reminder: <b>{html.escape(next_str)}</b>\n"
         "\n"
         "<b>🤖 LLM</b>\n"
@@ -188,4 +172,45 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         f"• Timezone: <b>{html.escape(config.timezone)}</b>"
     )
 
-    await update.message.reply_text(text, parse_mode="HTML")
+
+async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await reject_unauthorized(update, context):
+        return
+    if update.message is None:
+        return
+    config: Config = context.application.bot_data["config"]
+    await update.message.reply_text(
+        _format_status(config),
+        parse_mode="HTML",
+        reply_markup=_panel_keyboard(),
+    )
+
+
+async def status_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Single entrypoint for status:* callbacks. Right now that's just
+    the [🔄 Refresh] button — recomputes the dashboard and edits the
+    message in place.
+    """
+    if await reject_unauthorized(update, context):
+        return
+    query = update.callback_query
+    if query is None or query.data is None or query.message is None:
+        return
+    config: Config = context.application.bot_data["config"]
+
+    await query.answer()
+
+    if query.data == _CB_REFRESH:
+        try:
+            await query.message.edit_text(
+                _format_status(config),
+                parse_mode="HTML",
+                reply_markup=_panel_keyboard(),
+            )
+        except Exception:
+            # "Message is not modified" when nothing has changed since the
+            # last render — harmless; the panel is already up to date.
+            log.debug("status refresh: edit_text no-op", exc_info=True)
+        return
+
+    log.warning("status_callback: unrecognised callback_data %r", query.data)

@@ -38,7 +38,7 @@ log = logging.getLogger(__name__)
 
 # Surfaced in Telegram's "/" autocomplete menu via setMyCommands.
 BOT_COMMANDS: list[BotCommand] = [
-    BotCommand("water", "confirm you drank water"),
+    BotCommand("water", "water status panel with a [💧 Log glass] button"),
     BotCommand("brief", "re-run today's morning brief"),
     BotCommand("llm", "toggle LLM features (on|off)"),
     BotCommand("status", "bot health: water, day, LLM"),
@@ -70,6 +70,10 @@ def build_application(config: Config) -> Application:
         pattern=f"^{CONFIRM_CALLBACK}$",
     ))
     app.add_handler(CallbackQueryHandler(
+        water_handlers.water_panel_log,
+        pattern=f"^{water_handlers.PANEL_LOG_CALLBACK}$",
+    ))
+    app.add_handler(CallbackQueryHandler(
         morning_handlers.start_day_button,
         pattern=f"^{morning_handlers.START_DAY_CALLBACK}$",
     ))
@@ -86,6 +90,10 @@ def build_application(config: Config) -> Application:
     app.add_handler(CallbackQueryHandler(
         ticker_handlers.ticker_callback,
         pattern=f"^{ticker_handlers.TICKER_CALLBACK_PREFIX}",
+    ))
+    app.add_handler(CallbackQueryHandler(
+        status_handlers.status_callback,
+        pattern=f"^{status_handlers.STATUS_CALLBACK_PREFIX}",
     ))
     # Reply-to-reminder confirm. Exclude commands so /water doesn't double-fire.
     app.add_handler(MessageHandler(filters.REPLY & ~filters.COMMAND, water_handlers.water_reply))
