@@ -263,7 +263,10 @@ async def test_tickers_watchlist_listed(tmp_path: Path) -> None:
 
     await status_command(update, make_context(config))
     text = _reply(update)
-    assert "GOOGL, VFV.TO" in text
+    # Each ticker is its own indented sub-bullet under "Watchlist:".
+    assert "• Watchlist:" in text
+    assert "  ◦ <b>GOOGL</b>" in text
+    assert "  ◦ <b>VFV.TO</b>" in text
 
 
 @pytest.mark.asyncio

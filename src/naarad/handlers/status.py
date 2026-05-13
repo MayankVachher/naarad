@@ -156,9 +156,10 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         "runtime": "<b>off</b> (runtime)",
     }[reason]
     if tickers:
-        watchlist_html = f"<b>{html.escape(', '.join(tickers))}</b>"
+        bullets = "\n".join(f"  ◦ <b>{html.escape(t)}</b>" for t in tickers)
+        watchlist_block = f"• Watchlist:\n{bullets}"
     else:
-        watchlist_html = "<i>(none)</i>"
+        watchlist_block = "• Watchlist: <i>(none)</i>"
 
     text = (
         "<b>📋 Naarad status</b>\n"
@@ -175,7 +176,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         "\n"
         "<b>📈 Tickers</b>\n"
         f"• Status: {tickers_state}\n"
-        f"• Watchlist: {watchlist_html}\n"
+        f"{watchlist_block}\n"
         "\n"
         "<b>🌐 System</b>\n"
         f"• Timezone: <b>{html.escape(config.timezone)}</b>"
