@@ -96,7 +96,10 @@ CLAUDE = LLMBackend(
     default_bin="claude",
     flags=(
         "--strict-mcp-config",
-        "--mcp-config", "{}",
+        # `--mcp-config` validates the JSON against the MCP schema, so a
+        # bare `{}` is rejected with "mcpServers: expected record". The
+        # explicit empty mcpServers object passes validation cleanly.
+        "--mcp-config", '{"mcpServers":{}}',
         "--tools", _ALLOWED_TOOLS,
         "--max-turns", str(TURN_BUDGET),
         "--output-format", "text",

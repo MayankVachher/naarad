@@ -103,9 +103,10 @@ def test_claude_flags_lock_down_tools_and_mcp_discovery():
     turns_idx = flags.index("--max-turns")
     assert int(flags[turns_idx + 1]) >= 2
 
-    # MCP config must be empty (no servers loaded).
+    # MCP config must validate as an empty servers map (the schema
+    # rejects bare `{}` — needs `mcpServers` key).
     mcp_idx = flags.index("--mcp-config")
-    assert flags[mcp_idx + 1] == "{}"
+    assert flags[mcp_idx + 1] == '{"mcpServers":{}}'
 
     tools_idx = flags.index("--tools")
     allowed = flags[tools_idx + 1]
