@@ -19,6 +19,7 @@ from datetime import date
 from naarad.brief import sources
 from naarad.brief.sanitizer import sanitize_html
 from naarad.config import Config
+from naarad.llm.claude import TURN_BUDGET
 
 log = logging.getLogger(__name__)
 
@@ -43,7 +44,7 @@ You are writing Mayank's morning brief for {date_str}. He lives in {location_nam
 
 Use the RAW SOURCE DATA below as your primary input. Do not invent facts. Pick the highest-signal items; cut everything else. If a section is genuinely thin, say so in one warm line instead of padding.
 
-Optional research (Claude Code only — Copilot ignores this): you may use the WebSearch and WebFetch tools to supplement the raw data — e.g. confirm a headline is current, pull a missing detail, or find a more recent development. Budget: at most a handful of tool calls total (the CLI caps you at a few turns). Skip the tools entirely if the raw data already covers a section. Don't paste raw URLs into the output.
+Optional research (Claude Code only — Copilot ignores this): you may use the WebSearch and WebFetch tools to supplement the raw data — e.g. confirm a headline is current, pull a missing detail, or find a more recent development. Budget: you have {turn_budget} turns total to produce the final brief — this answer plus up to {tool_turns} tool calls combined. Plan accordingly; one or two focused searches beats five shallow ones. Skip the tools entirely if the raw data already covers a section. Don't paste raw URLs into the output.
 
 OUTPUT FORMAT (rendered with Telegram HTML parse mode — only <b>, <i>, <a> are allowed tags):
 
@@ -130,4 +131,6 @@ def build_prompt(today: date, config: Config) -> str:
         date_str=today.strftime("%A, %B %d, %Y"),
         location_name=config.brief.location_name,
         sources_block=_build_sources_block(today, config),
+        turn_budget=TURN_BUDGET,
+        tool_turns=TURN_BUDGET - 1,
     )
