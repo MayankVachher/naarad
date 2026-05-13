@@ -56,23 +56,53 @@ def make_config(tmp_path: Path, *, backend: str = "copilot") -> Config:
     )
 
 
-# ---- format_for_prompt: news headlines flag ---------------------------------
+# ---- format_for_prompt: include flags ---------------------------------------
 
-def test_format_for_prompt_includes_news_headlines_by_default() -> None:
+def test_format_for_prompt_full_block_includes_everything() -> None:
     text = sources.format_for_prompt(_ctx())
     for label in ("World headlines", "Canada headlines", "AI / Tech headlines", "Google-related headlines"):
         assert label in text
     assert "Weather" in text
+    assert "Notable today" in text
+    assert "Sunrise" in text
 
 
 def test_format_for_prompt_omits_news_headlines_when_disabled() -> None:
     text = sources.format_for_prompt(_ctx(), include_news_headlines=False)
     for label in ("World headlines", "Canada headlines", "AI / Tech headlines", "Google-related headlines"):
         assert label not in text
-    # Canonical sections still present.
+    # Weather/notable still in by default — only news was dropped.
     assert "Weather" in text
-    assert "On this day" in text
-    # Header is rewritten to match the new contract.
+    assert "Notable today" in text
+
+
+def test_format_for_prompt_omits_weather_when_disabled() -> None:
+    text = sources.format_for_prompt(_ctx(), include_weather=False)
+    assert "Weather" not in text
+    # Sunrise stays — it's astronomical, not a fetch.
+    assert "Sunrise" in text
+
+
+def test_format_for_prompt_omits_notable_when_disabled() -> None:
+    text = sources.format_for_prompt(_ctx(), include_notable=False)
+    assert "Notable today" not in text
+    assert "Weather" in text  # still in
+
+
+def test_format_for_prompt_search_only_keeps_sunrise() -> None:
+    """All-flags-off: only sunrise/sunset survives (math, not data)."""
+    text = sources.format_for_prompt(
+        _ctx(),
+        include_news_headlines=False,
+        include_weather=False,
+        include_notable=False,
+    )
+    for label in (
+        "World headlines", "Canada headlines", "AI / Tech headlines",
+        "Google-related headlines", "Weather", "Notable today",
+    ):
+        assert label not in text
+    assert "Sunrise" in text
     assert "REFERENCE DATA" in text
     assert "WebSearch" in text
 
@@ -93,14 +123,20 @@ def test_build_prompt_for_copilot_includes_news_headlines(tmp_path: Path, monkey
     assert "World headlines" in out
 
 
-def test_build_prompt_for_claude_omits_news_headlines(tmp_path: Path, monkeypatch) -> None:
+def test_build_prompt_for_claude_strips_all_searchable_data(tmp_path: Path, monkeypatch) -> None:
     _stub_build_context(monkeypatch)
     config = make_config(tmp_path, backend="claude")
     db.init_db(config.db_path)
     out = build_prompt(date(2026, 5, 12), config)
     assert "REFERENCE DATA" in out
-    for label in ("World headlines", "Canada headlines", "AI / Tech headlines", "Google-related headlines"):
+    # News, weather, notable — all sourced via WebSearch instead.
+    for label in (
+        "World headlines", "Canada headlines", "AI / Tech headlines",
+        "Google-related headlines", "Weather", "Notable today",
+    ):
         assert label not in out
+    # Sunrise is math, always passed.
+    assert "Sunrise" in out
 
 
 def test_build_prompt_runtime_backend_override_wins(tmp_path: Path, monkeypatch) -> None:

@@ -340,35 +340,40 @@ def _format_section(label: str, items: list[Headline]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def format_for_prompt(ctx: BriefContext, *, include_news_headlines: bool = True) -> str:
+def format_for_prompt(
+    ctx: BriefContext,
+    *,
+    include_news_headlines: bool = True,
+    include_weather: bool = True,
+    include_notable: bool = True,
+) -> str:
     """Render the BriefContext as a plaintext block for inclusion in the prompt.
 
     Empty sections are still included so the model knows that source
     returned nothing.
 
-    ``include_news_headlines`` controls whether the four live-news
-    section dumps (World / Canada / AI&Tech / Google-related) are
-    rendered. Backends with web search (Claude) call with ``False`` so
-    the model sources those sections via WebSearch instead of anchoring
-    on whatever happened to be in the RSS pool — feeds are noisy and
-    pollute editorial judgement otherwise. Backends without search
-    (Copilot) call with ``True``; they have nothing else to summarise
-    from.
+    The three include flags let callers strip individual data
+    categories. Backends with web search (Claude) strip everything
+    they can source live and keep only the deterministic bits
+    (sunrise/sunset is math, not data, so it always stays). Backends
+    without search (Copilot) keep everything — they have nothing else
+    to summarise from.
     """
-    if include_news_headlines:
+    if include_news_headlines and include_weather and include_notable:
         header = "RAW SOURCE DATA (for you to summarize):\n"
     else:
         header = (
-            "REFERENCE DATA — weather + on-this-day items are canonical "
-            "and should be used verbatim. The four live news sections "
-            "(WORLD, CANADA, AI &amp; TECH, AT GOOGLE) are intentionally "
-            "not provided here; source them via WebSearch.\n"
+            "REFERENCE DATA — only what's listed below is pre-fetched. "
+            "Everything else (including any sections marked empty here) "
+            "you source via WebSearch.\n"
         )
     parts: list[str] = [header]
 
     env_bits = []
-    if ctx.weather_line:
+    if include_weather and ctx.weather_line:
         env_bits.append(f"Weather ({ctx.location_name}): {ctx.weather_line}")
+    # Sunrise/sunset is computed astronomically, not fetched — always
+    # cheaper to pass than to make the model search for it.
     if ctx.sunrise and ctx.sunset:
         env_bits.append(f"Sunrise {ctx.sunrise} · Sunset {ctx.sunset}")
     if env_bits:
@@ -380,12 +385,13 @@ def format_for_prompt(ctx: BriefContext, *, include_news_headlines: bool = True)
         parts.append(_format_section("AI / Tech headlines", ctx.ai_tech))
         parts.append(_format_section("Google-related headlines", ctx.google))
 
-    if ctx.notable:
-        parts.append("Notable today (events / holidays / on-this-day):")
-        for n in ctx.notable:
-            parts.append(f"  - {n}")
-        parts.append("")
-    else:
-        parts.append("Notable today: (none fetched)\n")
+    if include_notable:
+        if ctx.notable:
+            parts.append("Notable today (events / holidays / on-this-day):")
+            for n in ctx.notable:
+                parts.append(f"  - {n}")
+            parts.append("")
+        else:
+            parts.append("Notable today: (none fetched)\n")
 
     return "\n".join(parts).rstrip() + "\n"

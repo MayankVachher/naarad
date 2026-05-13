@@ -95,7 +95,11 @@ _NO_PROMPT_TOOLS = ("WebSearch", "WebFetch")
 
 # Initial answer + up to (TURN_BUDGET - 1) tool-use cycles. The brief
 # prompt also surfaces this number so the model can self-pace.
-TURN_BUDGET = 5
+#
+# Six sections need searches under the search-only prompt (WEATHER +
+# WORLD + CANADA + AI&TECH + AT GOOGLE + NOTABLE TODAY); QUOTE is
+# model-sourced. Budget = 1 answer + 6 searches + 1 buffer = 8.
+TURN_BUDGET = 8
 
 CLAUDE = LLMBackend(
     name="claude",

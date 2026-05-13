@@ -46,16 +46,18 @@ You are writing Mayank's morning brief for {date_str}. He lives in {location_nam
 Do not invent facts. Pick the highest-signal items; cut everything else. If a section is genuinely thin even after searching, say so in one warm line instead of padding.
 
 Research workflow (Claude Code only — Copilot reads the RAW SOURCE DATA below and skips the tool steps):
-1. The data block below intentionally only includes weather + on-this-day. News headlines are NOT pre-fetched for you — you source them.
-2. For each of WORLD, CANADA, AI &amp; TECH, and AT GOOGLE: run ONE WebSearch for the single most important story of the day for that section. Frame your query like a human editor would ("biggest world news today", "top Canadian politics story today", "biggest AI release this week", "Google announcement today"). Pick what Mayank (engineer, Toronto, Google) would actually want to know — a Supreme Court ruling beats a celebrity tweet, a major model release beats a minor feature update.
-3. Use WebFetch only when a search result surfaces a critical URL worth reading in full (a specific ruling, paper, announcement). Skip it most of the time.
-4. Write the brief.
+1. The data block below is intentionally sparse — only sunrise/sunset is pre-fetched. Everything else (weather, all four news sections, notable today) you source via WebSearch.
+2. Run ONE WebSearch per section needed:
+   • WEATHER: "{location_name} weather today" — pull current temp, high/low, and any active alerts.
+   • WORLD / CANADA / AI &amp; TECH / AT GOOGLE: the single most important story of the day. Frame queries like an editor — "biggest world news today", "top Canadian politics story today", "biggest AI release this week", "Google announcement today". A Supreme Court ruling beats a celebrity tweet; a major model release beats a minor feature update.
+   • NOTABLE TODAY: "on this day {date_str}" — events, milestones, holidays. Pick three that Mayank (engineer, Toronto, Google) would find interesting.
+3. Use WebFetch only when a search result surfaces a critical URL worth reading in full. Skip it most of the time.
+4. QUOTE OF THE DAY stays your own pick — no tool needed.
+5. Write the brief.
 
 Trust your judgement on importance — a Supreme Court ruling beats a celebrity tweet, a major model release beats a minor feature update. Pick what Mayank (engineer, Toronto, Google) would actually want to know.
 
 Budget: {turn_budget} turns total — this answer plus up to {tool_turns} tool calls combined. Roughly one focused search per substantive section. Don't burn turns on side curiosities.
-
-WEATHER, NOTABLE TODAY, and QUOTE OF THE DAY don't need tool use — the raw weather block is canonical, NOTABLE TODAY comes from the on-this-day raw data, and QUOTE is your own pick. Save the tool budget for the four live sections.
 
 Don't paste raw URLs into the output. Don't cite the searches — just incorporate the facts.
 
@@ -124,7 +126,14 @@ Hard rules:
 {sources_block}"""
 
 
-def _build_sources_block(today: date, config: Config, *, include_news_headlines: bool) -> str:
+def _build_sources_block(
+    today: date,
+    config: Config,
+    *,
+    include_news_headlines: bool,
+    include_weather: bool,
+    include_notable: bool,
+) -> str:
     try:
         ctx = sources.build_context(
             today=today,
@@ -133,23 +142,34 @@ def _build_sources_block(today: date, config: Config, *, include_news_headlines:
             location_lon=config.brief.location_lon,
             timezone=config.timezone,
         )
-        return sources.format_for_prompt(ctx, include_news_headlines=include_news_headlines)
+        return sources.format_for_prompt(
+            ctx,
+            include_news_headlines=include_news_headlines,
+            include_weather=include_weather,
+            include_notable=include_notable,
+        )
     except Exception:
         log.exception("sources block build failed; sending the model an empty block")
         return "RAW SOURCE DATA: (all sources failed to fetch)\n"
 
 
 def build_prompt(today: date, config: Config) -> str:
-    # Claude has WebSearch, so we omit the RSS news dump to stop it
-    # anchoring on the feed's choices. Copilot has no search tool, so
-    # it gets the full RSS pool to summarise from. New backends should
-    # pick whichever side fits their tool set.
+    # Claude has WebSearch, so we strip everything search can re-source
+    # — weather, news headlines, notable today — to stop it anchoring
+    # on whatever we happened to pre-fetch. Only sunrise/sunset (math)
+    # survives. Copilot has no search tool, so it gets the full RSS +
+    # weather + notable to summarise from.
     backend = get_llm_backend(config)
-    include_news = backend != "claude"
+    keep_data = backend != "claude"
     return PROMPT_TEMPLATE.format(
         date_str=today.strftime("%A, %B %d, %Y"),
         location_name=config.brief.location_name,
-        sources_block=_build_sources_block(today, config, include_news_headlines=include_news),
+        sources_block=_build_sources_block(
+            today, config,
+            include_news_headlines=keep_data,
+            include_weather=keep_data,
+            include_notable=keep_data,
+        ),
         turn_budget=TURN_BUDGET,
         tool_turns=TURN_BUDGET - 1,
     )
