@@ -76,20 +76,33 @@ def test_copilot_flags_disable_tools_and_prompts():
     assert "--no-ask-user" in flags
 
 
-def test_claude_flags_lock_to_single_turn_no_tools():
-    """Claude Code CLI flag naming is mixed upstream: --max-turns and
-    --output-format are kebab-case but --disallowedTools is camelCase.
-    See https://code.claude.com/docs/en/cli-reference.
+def test_claude_flags_allow_web_tools_but_lock_down_code_tools():
+    """Brief prompt invites Claude to use WebSearch/WebFetch as a
+    supplement to the pre-fetched RSS, so those must be allowed; every
+    code-touching tool must stay disallowed.
+
+    CLI flag naming is mixed upstream: --max-turns and --output-format
+    are kebab-case but --disallowedTools is camelCase. See
+    https://code.claude.com/docs/en/cli-reference.
     """
     flags = CLAUDE.flags
     assert "--max-turns" in flags
     assert "--output-format" in flags
     assert "--disallowedTools" in flags
-    # Disallowed list should at least include the dangerous ones.
+
+    # Tool budget: more than one turn so the agentic loop can do tool
+    # use, but capped so the model can't go on a rabbit hole.
+    turns_idx = flags.index("--max-turns")
+    assert int(flags[turns_idx + 1]) >= 2
+
     idx = flags.index("--disallowedTools")
     disallowed = flags[idx + 1]
-    for t in ("Bash", "Edit", "Write"):
-        assert t in disallowed
+    # Code/host tools stay banned.
+    for t in ("Bash", "Edit", "Write", "Read", "Glob", "Grep", "Task", "NotebookEdit"):
+        assert t in disallowed, f"{t} should be disallowed"
+    # Web tools are deliberately ALLOWED — the brief uses them.
+    for t in ("WebSearch", "WebFetch"):
+        assert t not in disallowed, f"{t} should be allowed for the brief"
 
 
 # ---- resolve_bin -------------------------------------------------------------

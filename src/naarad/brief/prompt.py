@@ -41,7 +41,9 @@ def format_brief_body(today: date, raw: str) -> str:
 PROMPT_TEMPLATE = """\
 You are writing Mayank's morning brief for {date_str}. He lives in {location_name}, works at Google, reads this once over coffee. Tone: warm, dry-witted, plain-spoken. He's a sharp engineer — don't be cheesy.
 
-Use the RAW SOURCE DATA below. Do not invent facts. Pick the highest-signal items; cut everything else. If a section is genuinely thin, say so in one warm line instead of padding.
+Use the RAW SOURCE DATA below as your primary input. Do not invent facts. Pick the highest-signal items; cut everything else. If a section is genuinely thin, say so in one warm line instead of padding.
+
+Optional research (Claude Code only — Copilot ignores this): you may use the WebSearch and WebFetch tools to supplement the raw data — e.g. confirm a headline is current, pull a missing detail, or find a more recent development. Budget: at most a handful of tool calls total (the CLI caps you at a few turns). Skip the tools entirely if the raw data already covers a section. Don't paste raw URLs into the output.
 
 OUTPUT FORMAT (rendered with Telegram HTML parse mode — only <b>, <i>, <a> are allowed tags):
 
