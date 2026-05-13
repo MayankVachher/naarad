@@ -76,33 +76,35 @@ def test_copilot_flags_disable_tools_and_prompts():
     assert "--no-ask-user" in flags
 
 
-def test_claude_flags_allow_web_tools_but_lock_down_code_tools():
-    """Brief prompt invites Claude to use WebSearch/WebFetch as a
-    supplement to the pre-fetched RSS, so those must be allowed; every
-    code-touching tool must stay disallowed.
+def test_claude_flags_use_bare_mode_with_web_tools_whitelist():
+    """Claude runs scripted one-shots: --bare skips MCP/plugin/skill
+    discovery (otherwise the user's user-level MCP servers — Gmail,
+    Calendar, etc. — get pulled in and slow/confuse the call). --tools
+    whitelists only the read-only web tools the brief prompt invites.
 
-    CLI flag naming is mixed upstream: --max-turns and --output-format
-    are kebab-case but --disallowedTools is camelCase. See
-    https://code.claude.com/docs/en/cli-reference.
+    CLI flag naming is mixed upstream: --max-turns / --bare /
+    --output-format are kebab-case but --tools takes a comma-separated
+    list. See https://code.claude.com/docs/en/cli-reference.
     """
     flags = CLAUDE.flags
+    assert "--bare" in flags
     assert "--max-turns" in flags
     assert "--output-format" in flags
-    assert "--disallowedTools" in flags
+    assert "--tools" in flags
 
     # Tool budget: more than one turn so the agentic loop can do tool
     # use, but capped so the model can't go on a rabbit hole.
     turns_idx = flags.index("--max-turns")
     assert int(flags[turns_idx + 1]) >= 2
 
-    idx = flags.index("--disallowedTools")
-    disallowed = flags[idx + 1]
-    # Code/host tools stay banned.
-    for t in ("Bash", "Edit", "Write", "Read", "Glob", "Grep", "Task", "NotebookEdit"):
-        assert t in disallowed, f"{t} should be disallowed"
-    # Web tools are deliberately ALLOWED — the brief uses them.
+    tools_idx = flags.index("--tools")
+    allowed = flags[tools_idx + 1]
+    # Web tools are whitelisted — the brief prompt invites them.
     for t in ("WebSearch", "WebFetch"):
-        assert t not in disallowed, f"{t} should be allowed for the brief"
+        assert t in allowed, f"{t} should be in --tools whitelist"
+    # Code/host tools are NOT in the whitelist; --tools is a closed list.
+    for t in ("Bash", "Edit", "Write", "Read"):
+        assert t not in allowed, f"{t} must NOT be in --tools whitelist"
 
 
 # ---- resolve_bin -------------------------------------------------------------
