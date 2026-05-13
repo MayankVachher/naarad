@@ -1,17 +1,16 @@
 """Handlers for water-confirm events: /water log, the reminder button,
-the panel button, and replies.
+and the panel button.
 
-Confirm paths (reminder button, /water log, reply-to-reminder) do three
-things:
-1. Apply the confirm via ``scheduler.confirm_drink`` (state mutation +
-   reschedule). Returns the new glass count for the day.
-2. Edit the prior reminder (if known) to show "✅ Glass #N logged at HH:MM".
-3. Reply with the confirm response (which also includes the count).
+Confirm paths apply the confirm via ``scheduler.confirm_drink`` (state
+mutation + reschedule, returns the new glass count) and then surface
+the post-confirm view (count + pace badge + next reminder) to the user.
 
-``/water`` with no args renders a status panel with a single
-``[💧 Log glass]`` button. Tapping it confirms a glass and edits the
-panel in place with the refreshed status — same "panel mutates under
-your tap" pattern as ``/llm``.
+Surface choice:
+- Reminder button tap → overwrites the reminder message in place.
+- ``/water log`` → strips the prior reminder's keyboard (so it can't be
+  double-tapped) and replies with the confirm response.
+- ``/water`` panel button → edits the panel in place with refreshed
+  status, same "panel mutates under your tap" pattern as ``/llm``.
 """
 from __future__ import annotations
 
@@ -39,11 +38,11 @@ def _panel_keyboard() -> InlineKeyboardMarkup:
 log = logging.getLogger(__name__)
 
 
-def _confirm_response(config: Config) -> str:
-    """Build the post-confirm reply: count + pace badge + next reminder
-    time. Derived from the shared post-confirm view; ``confirm_drink``
-    has already committed the new glass count, so re-reading state here
-    is correct.
+def _confirm_response(config: Config, logged_at: datetime | None = None) -> str:
+    """Build the post-confirm reply: count (optionally suffixed with the
+    log time) + pace badge + next reminder time. Derived from the shared
+    post-confirm view; ``confirm_drink`` has already committed the new
+    glass count, so re-reading state here is correct.
     """
     view = compute_water_status(config)
     return messages.confirm_response(
@@ -52,6 +51,7 @@ def _confirm_response(config: Config) -> str:
         status=view.pace_status,
         deficit=view.pace_deficit,
         next_reminder_at=view.next_reminder_at,
+        logged_at=logged_at,
     )
 
 
@@ -68,38 +68,6 @@ def _status_response(config: Config) -> str:
         next_reminder_at=view.next_reminder_at,
         day_started=view.day_started,
     )
-
-
-async def _mark_reminder_logged(
-    context: ContextTypes.DEFAULT_TYPE,
-    chat_id: int,
-    message_id: int,
-    original_text: str | None,
-    now: datetime,
-    glasses_today: int,
-) -> None:
-    """Edit the reminder message to show it's been logged. Best-effort;
-    never raises. If we have the original text we rewrite the body
-    (preserving the original nudge above an italic confirmation line);
-    otherwise we just strip the keyboard so it can't be tapped again.
-    """
-    try:
-        if original_text:
-            await context.bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=message_id,
-                text=messages.logged_edit_text(original_text, now, glasses_today),
-                parse_mode="HTML",
-                reply_markup=None,
-            )
-        else:
-            await context.bot.edit_message_reply_markup(
-                chat_id=chat_id,
-                message_id=message_id,
-                reply_markup=None,
-            )
-    except Exception:
-        log.debug("mark-logged edit failed", exc_info=True)
 
 
 async def water_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -122,18 +90,23 @@ async def water_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     now = datetime.now(config.tz)
 
     # Snapshot last_msg_id BEFORE confirm so we know which reminder to
-    # edit; confirm_drink doesn't change last_msg_id but reads atomically.
+    # strip; confirm_drink doesn't change last_msg_id but reads atomically.
     state = db.get_water_state(config.db_path)
     last_msg_id = state.get("last_msg_id")
 
-    glasses = await scheduler.confirm_drink(context.application)
+    await scheduler.confirm_drink(context.application)
 
     if last_msg_id is not None:
-        await _mark_reminder_logged(
-            context, config.telegram.chat_id, last_msg_id, None, now, glasses,
-        )
+        try:
+            await context.bot.edit_message_reply_markup(
+                chat_id=config.telegram.chat_id,
+                message_id=last_msg_id,
+                reply_markup=None,
+            )
+        except Exception:
+            log.debug("strip reminder keyboard failed", exc_info=True)
     if update.message is not None:
-        await update.message.reply_text(_confirm_response(config))
+        await update.message.reply_text(_confirm_response(config, logged_at=now))
 
 
 async def water_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -149,25 +122,21 @@ async def water_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     config: Config = context.application.bot_data["config"]
     now = datetime.now(config.tz)
 
-    glasses = await scheduler.confirm_drink(context.application)
+    await scheduler.confirm_drink(context.application)
 
     if query.message is not None:
-        await _mark_reminder_logged(
-            context,
-            query.message.chat_id,
-            query.message.message_id,
-            query.message.text,
-            now,
-            glasses,
-        )
-        # Follow-up reply with the multi-line confirm response (count +
-        # pace badge + next reminder), matching /water log and the
-        # reply-to-reminder path. Without this, button taps surface only
-        # the inline "✅ Glass #N logged at HH:MM" edit and hide pace info.
-        await context.bot.send_message(
-            chat_id=query.message.chat_id,
-            text=_confirm_response(config),
-        )
+        # Overwrite the reminder with the full confirm response (count +
+        # pace badge + next reminder) in place — no follow-up message,
+        # so the reminder doesn't double up as two log entries in chat.
+        try:
+            await context.bot.edit_message_text(
+                chat_id=query.message.chat_id,
+                message_id=query.message.message_id,
+                text=_confirm_response(config, logged_at=now),
+                reply_markup=None,
+            )
+        except Exception:
+            log.debug("water reminder-button edit failed", exc_info=True)
 
 
 async def water_panel_log(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -204,30 +173,3 @@ async def water_panel_log(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
 
 
-async def water_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Triggered when the user replies to *anything*. Confirm only if
-    the reply is to the most recent water reminder we sent.
-    """
-    if await reject_unauthorized(update, context):
-        return
-    msg = update.message
-    if msg is None or msg.reply_to_message is None:
-        return
-    config: Config = context.application.bot_data["config"]
-    state = db.get_water_state(config.db_path)
-    last_msg_id = state.get("last_msg_id")
-    if last_msg_id is None or msg.reply_to_message.message_id != last_msg_id:
-        return
-    now = datetime.now(config.tz)
-
-    glasses = await scheduler.confirm_drink(context.application)
-
-    await _mark_reminder_logged(
-        context,
-        msg.reply_to_message.chat_id,
-        msg.reply_to_message.message_id,
-        msg.reply_to_message.text,
-        now,
-        glasses,
-    )
-    await msg.reply_text(_confirm_response(config))

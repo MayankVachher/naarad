@@ -10,7 +10,6 @@ from naarad.water.messages import (
     FIRST_OF_DAY_MESSAGE,
     confirm_response,
     humanize_minutes,
-    logged_edit_text,
     pace_status,
     reminder_text,
 )
@@ -142,23 +141,6 @@ def test_confirm_response_is_multi_line() -> None:
     # 2 lines when pace is disabled (no badge line)
     out2 = _confirm_call(daily_target=0, status="unknown")
     assert len(out2.split("\n")) == 2
-
-
-# ---- logged_edit_text -------------------------------------------------------
-
-def test_logged_edit_text_appends_count_and_time() -> None:
-    now = datetime(2026, 5, 7, 14, 5, tzinfo=TZ)
-    out = logged_edit_text("💧 Time for water", now, glasses_today=4)
-    assert "💧 Time for water" in out
-    assert "Glass #4" in out
-    assert "14:05" in out
-    assert "<i>" in out and "</i>" in out
-
-
-def test_logged_edit_text_handles_empty_original() -> None:
-    now = datetime(2026, 5, 7, 14, 5, tzinfo=TZ)
-    out = logged_edit_text("", now, glasses_today=1)
-    assert "Glass #1 logged at 14:05" in out
 
 
 # ---- regression: reminder_text + FIRST_OF_DAY_MESSAGE unchanged ------------

@@ -13,8 +13,6 @@ from telegram.ext import (
     ApplicationBuilder,
     CallbackQueryHandler,
     CommandHandler,
-    MessageHandler,
-    filters,
 )
 
 from naarad import db
@@ -95,8 +93,6 @@ def build_application(config: Config) -> Application:
         status_handlers.status_callback,
         pattern=f"^{status_handlers.STATUS_CALLBACK_PREFIX}",
     ))
-    # Reply-to-reminder confirm. Exclude commands so /water doesn't double-fire.
-    app.add_handler(MessageHandler(filters.REPLY & ~filters.COMMAND, water_handlers.water_reply))
 
     async def _post_init(app: Application) -> None:
         try:

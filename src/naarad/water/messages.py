@@ -87,11 +87,12 @@ def confirm_response(
     status: PaceStatus,
     deficit: float,
     next_reminder_at: datetime | None,
+    logged_at: datetime | None = None,
 ) -> str:
-    """The text sent back after /water, the 💧 button tap, or a reply
-    to a reminder. Multi-line, one fact per line:
+    """The text sent back after /water or the 💧 button tap. Multi-line,
+    one fact per line:
 
-      💧 Glass #N/T logged
+      💧 Glass #N/T logged at HH:MM   (time suffix included when logged_at given)
       🟢 On track            (omitted when pace tracking is disabled)
       ⏰ Next reminder at HH:MM    (or 🌙 No more reminders today.)
     """
@@ -100,7 +101,8 @@ def confirm_response(
         count = f"Glass #{glasses_today}/{daily_target}"
     else:
         count = f"Glass #{glasses_today}"
-    lines = [f"💧 {count} logged"]
+    suffix = f" at {logged_at.strftime('%H:%M')}" if logged_at is not None else ""
+    lines = [f"💧 {count} logged{suffix}"]
 
     # Line 2 (optional): pace badge.
     badge = _PACE_BADGES.get(status, "")
@@ -155,10 +157,3 @@ def status_response(
     return "\n".join(lines)
 
 
-def logged_edit_text(original: str, now: datetime, glasses_today: int) -> str:
-    """Edit-on-reminder body: append a small italic line confirming the
-    log and including the running glass count.
-    """
-    base = (original or "").rstrip()
-    stamp = now.strftime("%H:%M")
-    return f"{base}\n\n<i>✅ Glass #{glasses_today} logged at {stamp}</i>"
