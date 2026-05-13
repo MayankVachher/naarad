@@ -44,7 +44,16 @@ You are writing Mayank's morning brief for {date_str}. He lives in {location_nam
 
 Use the RAW SOURCE DATA below as your primary input. Do not invent facts. Pick the highest-signal items; cut everything else. If a section is genuinely thin, say so in one warm line instead of padding.
 
-Optional research (Claude Code only — Copilot ignores this): you may use the WebSearch and WebFetch tools to supplement the raw data — e.g. confirm a headline is current, pull a missing detail, or find a more recent development. Budget: you have {turn_budget} turns total to produce the final brief — this answer plus up to {tool_turns} tool calls combined. Plan accordingly; one or two focused searches beats five shallow ones. Skip the tools entirely if the raw data already covers a section. Don't paste raw URLs into the output.
+Research workflow (Claude Code only — Copilot ignores this):
+1. Read the RAW SOURCE DATA below.
+2. For each of WORLD, CANADA, AI &amp; TECH, and AT GOOGLE: pick the strongest seed headline from the raw pool, then run ONE WebSearch to (a) confirm it's still current, and (b) pull one concrete detail the raw RSS lacks — a name, figure, date, ruling, version number. If a section's raw pool is empty or stale (>24h), use the search result as the primary source for that section.
+3. Write the brief.
+
+Budget: {turn_budget} turns total — this answer plus up to {tool_turns} tool calls combined. That's one focused search per substantive section. Use WebFetch only when a search result has a critical URL worth reading in full; don't fetch arbitrarily.
+
+WEATHER, NOTABLE TODAY, and QUOTE OF THE DAY don't need tool use — the raw weather block is canonical, NOTABLE TODAY comes from the on-this-day raw data, and QUOTE is your own pick. Save the tool budget for the four live sections.
+
+Don't paste raw URLs into the output. Don't cite the searches — just incorporate the facts.
 
 OUTPUT FORMAT (rendered with Telegram HTML parse mode — only <b>, <i>, <a> are allowed tags):
 
