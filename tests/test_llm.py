@@ -76,26 +76,36 @@ def test_copilot_flags_disable_tools_and_prompts():
     assert "--no-ask-user" in flags
 
 
-def test_claude_flags_use_bare_mode_with_web_tools_whitelist():
-    """Claude runs scripted one-shots: --bare skips MCP/plugin/skill
-    discovery (otherwise the user's user-level MCP servers — Gmail,
-    Calendar, etc. — get pulled in and slow/confuse the call). --tools
-    whitelists only the read-only web tools the brief prompt invites.
+def test_claude_flags_lock_down_tools_and_mcp_discovery():
+    """Claude runs scripted one-shots. --tools whitelists only the
+    read-only web tools the brief prompt invites; --strict-mcp-config
+    + an empty --mcp-config blocks user-level MCP server auto-discovery
+    (Gmail/Calendar/etc.) without flipping the CLI into Agent-SDK mode
+    (which would break OAuth subscription auth).
 
-    CLI flag naming is mixed upstream: --max-turns / --bare /
-    --output-format are kebab-case but --tools takes a comma-separated
-    list. See https://code.claude.com/docs/en/cli-reference.
+    CLI flag naming is mixed upstream: --max-turns and --output-format
+    are kebab-case, --tools takes a comma-separated list, --mcp-config
+    accepts a JSON string or file path. See
+    https://code.claude.com/docs/en/cli-reference.
     """
     flags = CLAUDE.flags
-    assert "--bare" in flags
     assert "--max-turns" in flags
     assert "--output-format" in flags
     assert "--tools" in flags
+    assert "--strict-mcp-config" in flags
+    assert "--mcp-config" in flags
+    # --bare must NOT be set — it routes through the Agent SDK and
+    # breaks OAuth auth.
+    assert "--bare" not in flags
 
     # Tool budget: more than one turn so the agentic loop can do tool
     # use, but capped so the model can't go on a rabbit hole.
     turns_idx = flags.index("--max-turns")
     assert int(flags[turns_idx + 1]) >= 2
+
+    # MCP config must be empty (no servers loaded).
+    mcp_idx = flags.index("--mcp-config")
+    assert flags[mcp_idx + 1] == "{}"
 
     tools_idx = flags.index("--tools")
     allowed = flags[tools_idx + 1]
