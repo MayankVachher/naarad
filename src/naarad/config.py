@@ -20,12 +20,12 @@ def _parse_hhmm(value: str) -> dtime:
 
 
 class TelegramConfig(BaseModel):
-    token: str
-    chat_id: int
+    token: str = Field(description="BotFather token.")
+    chat_id: int = Field(description="Your personal chat ID — the bot only talks to this chat.")
 
 
 class EodhdConfig(BaseModel):
-    api_key: str
+    api_key: str = Field(description="EODHD API key (real-time quotes + per-exchange holiday calendar).")
 
 
 class LLMConfig(BaseModel):
@@ -40,8 +40,8 @@ class LLMConfig(BaseModel):
       - ``"claude"``  → Anthropic Claude Code CLI (needs ``claude login`` or
         ``ANTHROPIC_API_KEY``)
     """
-    enabled: bool = True
-    backend: Literal["copilot", "claude"] = "copilot"
+    enabled: bool = Field(default=True, description="Compile-time floor for LLM features. `false` makes the `/llm` toggle inert.")
+    backend: Literal["copilot", "claude"] = Field(default="copilot", description="Which CLI to shell out to: `\"copilot\"` or `\"claude\"`.")
 
 
 class TickersConfig(BaseModel):
@@ -57,8 +57,8 @@ class TickersConfig(BaseModel):
     user-facing `Config.timezone` so the morning/water schedulers can stay
     on local time without dragging the market jobs along.
     """
-    enabled: bool = True
-    market_timezone: str = "America/New_York"
+    enabled: bool = Field(default=True, description="Compile-time floor for the market jobs + `/quote`. `false` makes the `/ticker on|off` toggle inert.")
+    market_timezone: str = Field(default="America/New_York", description="Timezone the market_open/market_close jobs fire in; separate from user-facing `timezone`.")
 
     @field_validator("market_timezone")
     @classmethod
@@ -75,25 +75,23 @@ class TickersConfig(BaseModel):
 
 
 class WaterConfig(BaseModel):
-    active_end: str = "21:00"
-    intervals_minutes: list[int] = Field(default_factory=lambda: [120, 60, 30, 15, 5])
-    # Grace period between [Start day] and the first reminder of the
-    # day, applied only to the morning brief's Start tap (where you've
-    # likely walked away to brush teeth). The welcome message's Start
-    # tap bypasses the grace entirely — you're actively at the bot.
-    # Default 3 min.
-    first_reminder_delay_minutes: int = 3
-    # Daily glass-count target. Used to (1) display "N / target" in
-    # /status and the confirm response, and (2) tighten reminder
-    # intervals when the user is behind pace (see pace_floor). Set to 0
-    # to disable pace adjustment entirely; the bot still counts glasses
-    # but won't tweak cadences.
-    daily_target_glasses: int = 8
-    # Minimum interval multiplier when behind pace. Reminders will fire
-    # at most this fraction of the base interval no matter how far
-    # behind the user is. Default 0.3 caps the squeeze at ~3× the
-    # normal cadence — e.g. a 120-min base becomes at most 36 min.
-    pace_floor: float = 0.3
+    active_end: str = Field(default="21:00", description="After this time-of-day, no reminders fire until next morning's start.")
+    intervals_minutes: list[int] = Field(
+        default_factory=lambda: [120, 60, 30, 15, 5],
+        description="Escalation curve. The Nth value is the gap before reminder N+1 if you keep ignoring them.",
+    )
+    first_reminder_delay_minutes: int = Field(
+        default=3,
+        description="Grace between the morning brief's [Start day] tap and the first reminder. Welcome-button taps bypass it.",
+    )
+    daily_target_glasses: int = Field(
+        default=8,
+        description="Target glass count per day. Drives `/status` progress + pace-adjusted intervals. Set `0` to disable pace adjustment.",
+    )
+    pace_floor: float = Field(
+        default=0.3,
+        description="Minimum interval multiplier when behind pace. Caps the squeeze (default 0.3 = at most ~3× normal cadence). Range (0, 1].",
+    )
 
     @field_validator("intervals_minutes")
     @classmethod
@@ -129,14 +127,14 @@ class WaterConfig(BaseModel):
 
 
 class BriefConfig(BaseModel):
-    location_name: str = "Toronto"
-    location_lat: float = 43.6532
-    location_lon: float = -79.3832
+    location_name: str = Field(default="Toronto", description="City name shown in the morning brief.")
+    location_lat: float = Field(default=43.6532, description="Latitude for the weather + sunrise lookup.")
+    location_lon: float = Field(default=-79.3832, description="Longitude for the weather + sunrise lookup.")
 
 
 class MorningConfig(BaseModel):
-    start_time: str = "06:00"      # When the brief is generated and sent
-    fallback_time: str = "11:00"   # Auto-start water chain if no Start tap by this time
+    start_time: str = Field(default="06:00", description="When the daily brief is generated and sent.")
+    fallback_time: str = Field(default="11:00", description="If you haven't tapped [Start day] by this time, the water chain auto-starts.")
 
     @property
     def start_time_t(self) -> dtime:
@@ -148,22 +146,22 @@ class MorningConfig(BaseModel):
 
 
 class SchedulesConfig(BaseModel):
-    market_open: str = "09:35"
-    market_close: str = "16:05"
+    market_open: str = Field(default="09:35", description="Market-open snapshot time in `tickers.market_timezone`.")
+    market_close: str = Field(default="16:05", description="Market-close snapshot time in `tickers.market_timezone`.")
 
 
 class Config(BaseModel):
     telegram: TelegramConfig
     eodhd: EodhdConfig
-    timezone: str = "America/Toronto"
+    timezone: str = Field(default="America/Toronto", description="IANA timezone for water + morning schedules.")
     water: WaterConfig = Field(default_factory=WaterConfig)
     brief: BriefConfig = Field(default_factory=BriefConfig)
     morning: MorningConfig = Field(default_factory=MorningConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     tickers: TickersConfig = Field(default_factory=TickersConfig)
-    tickers_default: list[str] = Field(default_factory=list)
+    tickers_default: list[str] = Field(default_factory=list, description="Seed tickers planted into the DB on first init. Edits after first boot go through `/ticker`.")
     schedules: SchedulesConfig = Field(default_factory=SchedulesConfig)
-    db_path: str = "state.db"
+    db_path: str = Field(default="state.db", description="SQLite file path.")
 
     @field_validator("timezone")
     @classmethod
