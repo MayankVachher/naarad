@@ -20,6 +20,7 @@ from naarad.brief import sources
 from naarad.brief.sanitizer import sanitize_html
 from naarad.config import Config
 from naarad.llm.claude import TURN_BUDGET
+from naarad.runtime import get_llm_backend
 
 log = logging.getLogger(__name__)
 
@@ -45,8 +46,8 @@ You are writing Mayank's morning brief for {date_str}. He lives in {location_nam
 Do not invent facts. Pick the highest-signal items; cut everything else. If a section is genuinely thin even after searching, say so in one warm line instead of padding.
 
 Research workflow (Claude Code only — Copilot reads the RAW SOURCE DATA below and skips the tool steps):
-1. Skim the RAW SOURCE DATA as a starting signal — it tells you what's in the air, but it's not canonical and may be incomplete or stale.
-2. For each of WORLD, CANADA, AI &amp; TECH, and AT GOOGLE: find the single most important story of the day for that section. The raw RSS is one input; one focused WebSearch is another. If a story is in the raw pool AND a search confirms it's the day's biggest, use it. If a story is missing from raw but search shows it's far more important, write it instead. If the raw pool's top item looks low-signal once you search, override it — don't anchor on the RSS just because it's there.
+1. The data block below intentionally only includes weather + on-this-day. News headlines are NOT pre-fetched for you — you source them.
+2. For each of WORLD, CANADA, AI &amp; TECH, and AT GOOGLE: run ONE WebSearch for the single most important story of the day for that section. Frame your query like a human editor would ("biggest world news today", "top Canadian politics story today", "biggest AI release this week", "Google announcement today"). Pick what Mayank (engineer, Toronto, Google) would actually want to know — a Supreme Court ruling beats a celebrity tweet, a major model release beats a minor feature update.
 3. Use WebFetch only when a search result surfaces a critical URL worth reading in full (a specific ruling, paper, announcement). Skip it most of the time.
 4. Write the brief.
 
@@ -123,7 +124,7 @@ Hard rules:
 {sources_block}"""
 
 
-def _build_sources_block(today: date, config: Config) -> str:
+def _build_sources_block(today: date, config: Config, *, include_news_headlines: bool) -> str:
     try:
         ctx = sources.build_context(
             today=today,
@@ -132,17 +133,23 @@ def _build_sources_block(today: date, config: Config) -> str:
             location_lon=config.brief.location_lon,
             timezone=config.timezone,
         )
-        return sources.format_for_prompt(ctx)
+        return sources.format_for_prompt(ctx, include_news_headlines=include_news_headlines)
     except Exception:
-        log.exception("sources block build failed; sending Copilot an empty block")
+        log.exception("sources block build failed; sending the model an empty block")
         return "RAW SOURCE DATA: (all sources failed to fetch)\n"
 
 
 def build_prompt(today: date, config: Config) -> str:
+    # Claude has WebSearch, so we omit the RSS news dump to stop it
+    # anchoring on the feed's choices. Copilot has no search tool, so
+    # it gets the full RSS pool to summarise from. New backends should
+    # pick whichever side fits their tool set.
+    backend = get_llm_backend(config)
+    include_news = backend != "claude"
     return PROMPT_TEMPLATE.format(
         date_str=today.strftime("%A, %B %d, %Y"),
         location_name=config.brief.location_name,
-        sources_block=_build_sources_block(today, config),
+        sources_block=_build_sources_block(today, config, include_news_headlines=include_news),
         turn_budget=TURN_BUDGET,
         tool_turns=TURN_BUDGET - 1,
     )

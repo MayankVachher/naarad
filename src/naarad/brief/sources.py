@@ -340,14 +340,31 @@ def _format_section(label: str, items: list[Headline]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def format_for_prompt(ctx: BriefContext) -> str:
+def format_for_prompt(ctx: BriefContext, *, include_news_headlines: bool = True) -> str:
     """Render the BriefContext as a plaintext block for inclusion in the prompt.
 
-    The Copilot prompt then asks the model to summarize / rewrite this raw
-    material in the desired tone and structure. Empty sections are still
-    included so the model knows that source returned nothing.
+    Empty sections are still included so the model knows that source
+    returned nothing.
+
+    ``include_news_headlines`` controls whether the four live-news
+    section dumps (World / Canada / AI&Tech / Google-related) are
+    rendered. Backends with web search (Claude) call with ``False`` so
+    the model sources those sections via WebSearch instead of anchoring
+    on whatever happened to be in the RSS pool — feeds are noisy and
+    pollute editorial judgement otherwise. Backends without search
+    (Copilot) call with ``True``; they have nothing else to summarise
+    from.
     """
-    parts: list[str] = ["RAW SOURCE DATA (for you to summarize):\n"]
+    if include_news_headlines:
+        header = "RAW SOURCE DATA (for you to summarize):\n"
+    else:
+        header = (
+            "REFERENCE DATA — weather + on-this-day items are canonical "
+            "and should be used verbatim. The four live news sections "
+            "(WORLD, CANADA, AI &amp; TECH, AT GOOGLE) are intentionally "
+            "not provided here; source them via WebSearch.\n"
+        )
+    parts: list[str] = [header]
 
     env_bits = []
     if ctx.weather_line:
@@ -357,10 +374,11 @@ def format_for_prompt(ctx: BriefContext) -> str:
     if env_bits:
         parts.append("\n".join(env_bits) + "\n")
 
-    parts.append(_format_section("World headlines", ctx.world))
-    parts.append(_format_section("Canada headlines", ctx.canada))
-    parts.append(_format_section("AI / Tech headlines", ctx.ai_tech))
-    parts.append(_format_section("Google-related headlines", ctx.google))
+    if include_news_headlines:
+        parts.append(_format_section("World headlines", ctx.world))
+        parts.append(_format_section("Canada headlines", ctx.canada))
+        parts.append(_format_section("AI / Tech headlines", ctx.ai_tech))
+        parts.append(_format_section("Google-related headlines", ctx.google))
 
     if ctx.notable:
         parts.append("Notable today (events / holidays / on-this-day):")
