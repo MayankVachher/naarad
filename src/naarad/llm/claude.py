@@ -84,7 +84,14 @@ def _debug_file_flags(log_label: str) -> tuple[str, ...]:
 
 # Read-only web tools the brief prompt invites. Everything else is off
 # by default under --tools.
+#
+# `--tools` is comma-separated and controls *availability*. `--allowedTools`
+# is space-separated and skips the permission prompt — without it, the
+# CLI would try to ask the user in scripted `-p` mode, fail to get an
+# answer, and the model writes "search wasn't authorised, the live
+# wire is dark" instead of using the tool.
 _ALLOWED_TOOLS = "WebSearch,WebFetch"
+_NO_PROMPT_TOOLS = ("WebSearch", "WebFetch")
 
 # Initial answer + up to (TURN_BUDGET - 1) tool-use cycles. The brief
 # prompt also surfaces this number so the model can self-pace.
@@ -101,6 +108,7 @@ CLAUDE = LLMBackend(
         # explicit empty mcpServers object passes validation cleanly.
         "--mcp-config", '{"mcpServers":{}}',
         "--tools", _ALLOWED_TOOLS,
+        "--allowedTools", *_NO_PROMPT_TOOLS,
         "--max-turns", str(TURN_BUDGET),
         "--output-format", "text",
         # Skip session-title generation (one fewer API call per brief)

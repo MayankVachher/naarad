@@ -92,6 +92,7 @@ def test_claude_flags_lock_down_tools_and_mcp_discovery():
     assert "--max-turns" in flags
     assert "--output-format" in flags
     assert "--tools" in flags
+    assert "--allowedTools" in flags
     assert "--strict-mcp-config" in flags
     assert "--mcp-config" in flags
     # No session state — saves an API round-trip (session-title gen)
@@ -101,6 +102,15 @@ def test_claude_flags_lock_down_tools_and_mcp_discovery():
     # --bare must NOT be set — it routes through the Agent SDK and
     # breaks OAuth auth.
     assert "--bare" not in flags
+
+    # Both web tools must skip the permission prompt; without that
+    # they'd fail silently in non-interactive `-p` mode.
+    allowed_idx = flags.index("--allowedTools")
+    # --allowedTools accepts multiple positional values; both web
+    # tools must appear after the flag.
+    rest = flags[allowed_idx + 1:]
+    assert "WebSearch" in rest
+    assert "WebFetch" in rest
 
     # Tool budget: more than one turn so the agentic loop can do tool
     # use, but capped so the model can't go on a rabbit hole.
