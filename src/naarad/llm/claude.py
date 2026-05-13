@@ -103,6 +103,11 @@ CLAUDE = LLMBackend(
         "--tools", _ALLOWED_TOOLS,
         "--max-turns", str(TURN_BUDGET),
         "--output-format", "text",
+        # Skip session-title generation (one fewer API call per brief)
+        # and project-state writes (no more EROFS errors under the
+        # hardened systemd sandbox). We never resume sessions, so
+        # there's nothing to persist.
+        "--no-session-persistence",
     ),
     extra_flags=_debug_file_flags,
 )

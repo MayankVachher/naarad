@@ -42,14 +42,17 @@ def format_brief_body(today: date, raw: str) -> str:
 PROMPT_TEMPLATE = """\
 You are writing Mayank's morning brief for {date_str}. He lives in {location_name}, works at Google, reads this once over coffee. Tone: warm, dry-witted, plain-spoken. He's a sharp engineer — don't be cheesy.
 
-Use the RAW SOURCE DATA below as your primary input. Do not invent facts. Pick the highest-signal items; cut everything else. If a section is genuinely thin, say so in one warm line instead of padding.
+Do not invent facts. Pick the highest-signal items; cut everything else. If a section is genuinely thin even after searching, say so in one warm line instead of padding.
 
-Research workflow (Claude Code only — Copilot ignores this):
-1. Read the RAW SOURCE DATA below.
-2. For each of WORLD, CANADA, AI &amp; TECH, and AT GOOGLE: pick the strongest seed headline from the raw pool, then run ONE WebSearch to (a) confirm it's still current, and (b) pull one concrete detail the raw RSS lacks — a name, figure, date, ruling, version number. If a section's raw pool is empty or stale (>24h), use the search result as the primary source for that section.
-3. Write the brief.
+Research workflow (Claude Code only — Copilot reads the RAW SOURCE DATA below and skips the tool steps):
+1. Skim the RAW SOURCE DATA as a starting signal — it tells you what's in the air, but it's not canonical and may be incomplete or stale.
+2. For each of WORLD, CANADA, AI &amp; TECH, and AT GOOGLE: find the single most important story of the day for that section. The raw RSS is one input; one focused WebSearch is another. If a story is in the raw pool AND a search confirms it's the day's biggest, use it. If a story is missing from raw but search shows it's far more important, write it instead. If the raw pool's top item looks low-signal once you search, override it — don't anchor on the RSS just because it's there.
+3. Use WebFetch only when a search result surfaces a critical URL worth reading in full (a specific ruling, paper, announcement). Skip it most of the time.
+4. Write the brief.
 
-Budget: {turn_budget} turns total — this answer plus up to {tool_turns} tool calls combined. That's one focused search per substantive section. Use WebFetch only when a search result has a critical URL worth reading in full; don't fetch arbitrarily.
+Trust your judgement on importance — a Supreme Court ruling beats a celebrity tweet, a major model release beats a minor feature update. Pick what Mayank (engineer, Toronto, Google) would actually want to know.
+
+Budget: {turn_budget} turns total — this answer plus up to {tool_turns} tool calls combined. Roughly one focused search per substantive section. Don't burn turns on side curiosities.
 
 WEATHER, NOTABLE TODAY, and QUOTE OF THE DAY don't need tool use — the raw weather block is canonical, NOTABLE TODAY comes from the on-this-day raw data, and QUOTE is your own pick. Save the tool budget for the four live sections.
 

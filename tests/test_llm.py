@@ -94,6 +94,10 @@ def test_claude_flags_lock_down_tools_and_mcp_discovery():
     assert "--tools" in flags
     assert "--strict-mcp-config" in flags
     assert "--mcp-config" in flags
+    # No session state — saves an API round-trip (session-title gen)
+    # and stops project-state writes that fail under the hardened
+    # systemd sandbox.
+    assert "--no-session-persistence" in flags
     # --bare must NOT be set — it routes through the Agent SDK and
     # breaks OAuth auth.
     assert "--bare" not in flags
