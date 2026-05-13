@@ -16,7 +16,8 @@ import logging
 import os
 import shutil
 import subprocess
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import datetime
 
 log = logging.getLogger(__name__)
@@ -26,14 +27,20 @@ log = logging.getLogger(__name__)
 class LLMBackend:
     """Description of a CLI backend.
 
-    ``flags`` are appended after ``-p <prompt>`` on every invocation. Edit
-    the flag set in the backend module, not at call sites.
+    ``flags`` are appended after ``-p <prompt>`` on every invocation; edit
+    that set in the backend module, not at call sites.
+
+    ``extra_flags`` is an optional per-call hook for flags whose value
+    depends on the call (e.g. a unique debug-log path). Receives the
+    ``log_label`` so it can incorporate it into filenames. Stays None
+    for backends with nothing dynamic to add.
     """
 
     name: str           # human-readable backend label, also config key
     env_var: str        # env override for the binary path (e.g. COPILOT_BIN)
     default_bin: str    # PATH-resolved name when env_var is unset
     flags: tuple[str, ...]
+    extra_flags: Callable[[str], tuple[str, ...]] | None = field(default=None)
 
 
 @dataclass(frozen=True)
@@ -74,7 +81,17 @@ def run_llm(
     """Invoke ``<bin> -p <prompt> <flags>`` non-interactively. Never raises
     — every failure path is captured into a ``LLMResult(ok=False, ...)``.
     """
-    cmd = [resolve_bin(backend), "-p", prompt, *backend.flags]
+    extras: tuple[str, ...] = ()
+    if backend.extra_flags is not None:
+        try:
+            extras = backend.extra_flags(log_label)
+        except Exception:
+            log.exception(
+                "%s/%s: extra_flags hook crashed; running without its flags",
+                backend.name, log_label,
+            )
+            extras = ()
+    cmd = [resolve_bin(backend), "-p", prompt, *backend.flags, *extras]
 
     log.info("invoking %s/%s (timeout=%ds)", backend.name, log_label, timeout)
     started = datetime.now()

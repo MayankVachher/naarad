@@ -318,3 +318,83 @@ def test_run_llm_returns_failure_on_empty_stdout(monkeypatch):
     result = run_llm(fake, "prompt", timeout=1, log_label="t")
     assert result.ok is False
     assert "empty" in result.error_reason
+
+
+# ---- claude --debug-file (env-gated agentic trace) -------------------------
+
+def test_claude_debug_file_off_by_default(monkeypatch):
+    """Without NAARAD_LLM_DEBUG, the extra_flags hook returns nothing
+    so we don't write debug logs on every brief.
+    """
+    monkeypatch.delenv("NAARAD_LLM_DEBUG", raising=False)
+    assert CLAUDE.extra_flags is not None
+    assert CLAUDE.extra_flags("brief") == ()
+
+
+def test_claude_debug_file_adds_flag_when_env_set(tmp_path, monkeypatch):
+    """With the env var set, extra_flags returns --debug-file <path>
+    pointing at a fresh per-call file inside the configured dir.
+    """
+    monkeypatch.setenv("NAARAD_LLM_DEBUG", "1")
+    monkeypatch.setenv("NAARAD_LLM_DEBUG_DIR", str(tmp_path))
+    assert CLAUDE.extra_flags is not None
+    extras = CLAUDE.extra_flags("brief")
+    assert extras[0] == "--debug-file"
+    written_path = Path(extras[1])
+    # File path lands inside the requested dir; the dir was created on demand.
+    assert written_path.parent == tmp_path
+    assert tmp_path.exists()
+    assert "brief" in written_path.name
+
+
+def test_run_llm_invokes_extra_flags_hook(monkeypatch):
+    """run_llm should call extra_flags(log_label) and append its
+    output to the command line.
+    """
+    captured: dict[str, object] = {}
+
+    class _Result:
+        returncode = 0
+        stdout = "ok"
+        stderr = ""
+
+    def _spy(cmd, **kw):
+        captured["cmd"] = list(cmd)
+        return _Result()
+    monkeypatch.setattr("subprocess.run", _spy)
+
+    def _extra(label: str) -> tuple[str, ...]:
+        return ("--debug-file", f"/tmp/{label}.log")
+
+    backend = LLMBackend(
+        name="fake", env_var="FAKE_BIN", default_bin="fake",
+        flags=("--foo",), extra_flags=_extra,
+    )
+    run_llm(backend, "prompt", timeout=1, log_label="brief")
+
+    cmd = captured["cmd"]
+    assert "--foo" in cmd
+    assert "--debug-file" in cmd
+    assert "/tmp/brief.log" in cmd
+
+
+def test_run_llm_tolerates_extra_flags_hook_crash(monkeypatch):
+    """If the hook raises, run_llm should still execute (without the
+    extra flags) rather than failing the whole call.
+    """
+    class _Result:
+        returncode = 0
+        stdout = "ok"
+        stderr = ""
+
+    monkeypatch.setattr("subprocess.run", lambda *a, **kw: _Result())
+
+    def _boom(label: str) -> tuple[str, ...]:
+        raise RuntimeError("hook broke")
+
+    backend = LLMBackend(
+        name="fake", env_var="FAKE_BIN", default_bin="fake",
+        flags=(), extra_flags=_boom,
+    )
+    result = run_llm(backend, "prompt", timeout=1, log_label="brief")
+    assert result.ok is True
