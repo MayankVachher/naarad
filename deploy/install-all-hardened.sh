@@ -207,7 +207,10 @@ case "$BACKEND" in
         run_as_ai "
             set -euo pipefail
             if [ ! -x \$HOME/.local/bin/claude ] && ! command -v claude >/dev/null 2>&1; then
-                curl -fsSL https://claude.ai/install.sh | sh
+                # The Claude installer is bash-only; piping to /bin/sh
+                # (dash on Debian/Ubuntu) trips a 'Syntax error: "("
+                # unexpected' on its array assignments.
+                curl -fsSL https://claude.ai/install.sh | bash
             fi
         "
         ;;
