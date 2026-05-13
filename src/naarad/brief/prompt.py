@@ -46,9 +46,8 @@ You are writing Mayank's morning brief for {date_str}. He lives in {location_nam
 Do not invent facts. Pick the highest-signal items; cut everything else. If a section is genuinely thin even after searching, say so in one warm line instead of padding.
 
 Research workflow (Claude Code only — Copilot reads the RAW SOURCE DATA below and skips the tool steps):
-1. The data block below is intentionally sparse — only sunrise/sunset is pre-fetched. Everything else (weather, all four news sections, notable today) you source via WebSearch.
+1. The data block below is sparse on purpose. Sunrise/sunset is deterministic math — always use it as given. Weather is a baseline reading from a forecast API — fine to use as-is, but you can run ONE WebSearch if you want to layer on alerts, AQI, severe-weather updates, or a richer "Heads-up". Don't burn a turn just to confirm a temperature. News and notable today you source entirely via WebSearch.
 2. Run ONE WebSearch per section needed:
-   • WEATHER: "{location_name} weather today" — pull current temp, high/low, and any active alerts.
    • WORLD / CANADA / AI &amp; TECH / AT GOOGLE: the single most important story of the day. Frame queries like an editor — "biggest world news today", "top Canadian politics story today", "biggest AI release this week", "Google announcement today". A Supreme Court ruling beats a celebrity tweet; a major model release beats a minor feature update.
    • NOTABLE TODAY: "on this day {date_str}" — events, milestones, holidays. Pick three that Mayank (engineer, Toronto, Google) would find interesting.
 3. Use WebFetch only when a search result surfaces a critical URL worth reading in full. Skip it most of the time.
@@ -154,21 +153,20 @@ def _build_sources_block(
 
 
 def build_prompt(today: date, config: Config) -> str:
-    # Claude has WebSearch, so we strip everything search can re-source
-    # — weather, news headlines, notable today — to stop it anchoring
-    # on whatever we happened to pre-fetch. Only sunrise/sunset (math)
-    # survives. Copilot has no search tool, so it gets the full RSS +
-    # weather + notable to summarise from.
+    # Claude has WebSearch; strip news + notable so it doesn't anchor on
+    # whatever we happened to pre-fetch. Weather stays — Open-Meteo's
+    # numeric reading is canonical and a search wouldn't beat it. Copilot
+    # has no search tool, so it gets the full set to summarise from.
     backend = get_llm_backend(config)
-    keep_data = backend != "claude"
+    is_claude = backend == "claude"
     return PROMPT_TEMPLATE.format(
         date_str=today.strftime("%A, %B %d, %Y"),
         location_name=config.brief.location_name,
         sources_block=_build_sources_block(
             today, config,
-            include_news_headlines=keep_data,
-            include_weather=keep_data,
-            include_notable=keep_data,
+            include_news_headlines=not is_claude,
+            include_weather=True,  # canonical for both backends
+            include_notable=not is_claude,
         ),
         turn_budget=TURN_BUDGET,
         tool_turns=TURN_BUDGET - 1,

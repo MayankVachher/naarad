@@ -123,19 +123,22 @@ def test_build_prompt_for_copilot_includes_news_headlines(tmp_path: Path, monkey
     assert "World headlines" in out
 
 
-def test_build_prompt_for_claude_strips_all_searchable_data(tmp_path: Path, monkeypatch) -> None:
+def test_build_prompt_for_claude_strips_news_and_notable_but_keeps_weather(
+    tmp_path: Path, monkeypatch,
+) -> None:
     _stub_build_context(monkeypatch)
     config = make_config(tmp_path, backend="claude")
     db.init_db(config.db_path)
     out = build_prompt(date(2026, 5, 12), config)
     assert "REFERENCE DATA" in out
-    # News, weather, notable — all sourced via WebSearch instead.
+    # News + notable sourced via WebSearch instead.
     for label in (
         "World headlines", "Canada headlines", "AI / Tech headlines",
-        "Google-related headlines", "Weather", "Notable today",
+        "Google-related headlines", "Notable today",
     ):
         assert label not in out
-    # Sunrise is math, always passed.
+    # Weather + sunrise pre-fetched and canonical.
+    assert "Weather" in out
     assert "Sunrise" in out
 
 
