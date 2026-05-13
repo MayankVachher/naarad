@@ -20,8 +20,8 @@ from naarad.config import (
     TelegramConfig,
     WaterConfig,
 )
-from naarad.handlers.llm import llm_command
-from naarad.runtime import LLM_FLAG_KEY
+from naarad.handlers.llm import llm_callback, llm_command
+from naarad.runtime import LLM_BACKEND_KEY, LLM_FLAG_KEY
 
 
 def make_config(tmp_path: Path, *, llm_enabled: bool = True) -> Config:
@@ -59,6 +59,23 @@ def _reply_text(update) -> str:
     return update.message.reply_text.await_args.args[0]
 
 
+def _reply_markup(update):
+    """Return the InlineKeyboardMarkup the last reply_text was sent with."""
+    return update.message.reply_text.await_args.kwargs.get("reply_markup")
+
+
+def make_callback_update(data: str, chat_id: int = 42):
+    """An update shaped like a callback-query press."""
+    query = AsyncMock()
+    query.data = data
+    query.message = AsyncMock()
+    return SimpleNamespace(
+        effective_chat=SimpleNamespace(id=chat_id),
+        message=None,
+        callback_query=query,
+    )
+
+
 # ---- show state --------------------------------------------------------------
 
 @pytest.mark.asyncio
@@ -70,7 +87,7 @@ async def test_no_args_shows_on_state_when_enabled(tmp_path: Path) -> None:
     await llm_command(update, make_context(config))
 
     text = _reply_text(update)
-    assert "<b>on</b>" in text
+    assert "LLM: on" in text
 
 
 @pytest.mark.asyncio
@@ -83,7 +100,7 @@ async def test_no_args_shows_runtime_off_when_db_disabled(tmp_path: Path) -> Non
     await llm_command(update, make_context(config))
 
     text = _reply_text(update)
-    assert "<b>off</b>" in text
+    assert "LLM: off" in text
     assert "runtime" in text
 
 
@@ -97,7 +114,7 @@ async def test_no_args_shows_config_off_state(tmp_path: Path) -> None:
 
     text = _reply_text(update)
     assert "config" in text
-    assert "<b>off</b>" in text
+    assert "LLM: off" in text
 
 
 # ---- toggle ------------------------------------------------------------------
@@ -281,7 +298,7 @@ async def test_backend_refused_when_config_floor_off(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_state_output_mentions_test_and_backend(tmp_path: Path) -> None:
-    """Regression: `test` and `backend` should appear in /llm's no-arg help
+    """Regression: `test` and `backend` should appear in /llm's no-arg panel
     so the user doesn't have to guess at sub-commands.
     """
     config = make_config(tmp_path)
@@ -291,8 +308,125 @@ async def test_state_output_mentions_test_and_backend(tmp_path: Path) -> None:
     await llm_command(update, make_context(config))
 
     text = _reply_text(update)
-    assert "/llm test" in text
+    # Every sub-command must appear, with concrete examples:
+    for cmd in (
+        "/llm on",
+        "/llm off",
+        "/llm test",
+        "/llm backend copilot",
+        "/llm backend claude",
+    ):
+        assert cmd in text
     assert "Backend:" in text
+
+
+# ---- panel keyboard --------------------------------------------------------
+
+def _kb_button_texts(markup):
+    """Flatten an InlineKeyboardMarkup to a list of button labels."""
+    if markup is None:
+        return []
+    return [btn.text for row in markup.inline_keyboard for btn in row]
+
+
+@pytest.mark.asyncio
+async def test_no_args_panel_includes_action_buttons(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    update = make_update()
+
+    await llm_command(update, make_context(config))
+
+    labels = _kb_button_texts(_reply_markup(update))
+    assert any("Test" in lbl for lbl in labels)
+    assert any("Switch backend" in lbl for lbl in labels)
+    assert any("Disable" in lbl or "Enable" in lbl for lbl in labels)
+
+
+@pytest.mark.asyncio
+async def test_panel_has_no_buttons_when_config_floor_off(tmp_path: Path) -> None:
+    """No actions to take when the config gates everything off — skip the
+    button row rather than render greyed-out buttons.
+    """
+    config = make_config(tmp_path, llm_enabled=False)
+    db.init_db(config.db_path)
+    update = make_update()
+
+    await llm_command(update, make_context(config))
+
+    assert _reply_markup(update) is None
+
+
+# ---- /llm backend renders a button selector --------------------------------
+
+@pytest.mark.asyncio
+async def test_backend_no_arg_renders_keyboard_with_both_backends(
+    tmp_path: Path,
+) -> None:
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    update = make_update()
+
+    await llm_command(update, make_context(config, args=["backend"]))
+
+    labels = _kb_button_texts(_reply_markup(update))
+    # Both backends present; the current one has a ✓.
+    assert any("copilot" in lbl and "✓" in lbl for lbl in labels)
+    assert any("claude" in lbl for lbl in labels)
+
+
+# ---- callback paths --------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_callback_backend_set_persists_override(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    update = make_callback_update("llm:backend:claude")
+
+    await llm_callback(update, make_context(config))
+
+    assert db.get_setting(config.db_path, LLM_BACKEND_KEY) == "claude"
+    # Message refreshed via edit_text with the menu (✓ now on claude).
+    update.callback_query.message.edit_text.assert_awaited_once()
+    args, kwargs = update.callback_query.message.edit_text.await_args
+    labels = _kb_button_texts(kwargs.get("reply_markup"))
+    assert any("claude" in lbl and "✓" in lbl for lbl in labels)
+
+
+@pytest.mark.asyncio
+async def test_callback_toggle_flips_runtime_flag(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    # Currently on (default) — toggle should turn off.
+    update = make_callback_update("llm:toggle")
+
+    await llm_callback(update, make_context(config))
+
+    assert db.get_setting(config.db_path, LLM_FLAG_KEY) == "0"
+
+
+@pytest.mark.asyncio
+async def test_callback_backend_set_blocked_when_floor_off(tmp_path: Path) -> None:
+    config = make_config(tmp_path, llm_enabled=False)
+    db.init_db(config.db_path)
+    update = make_callback_update("llm:backend:claude")
+
+    await llm_callback(update, make_context(config))
+
+    # Override must NOT have been written.
+    assert db.get_setting(config.db_path, LLM_BACKEND_KEY) is None
+
+
+@pytest.mark.asyncio
+async def test_callback_rejects_unauthorized_chat(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    update = make_callback_update("llm:backend:claude", chat_id=999)
+
+    await llm_callback(update, make_context(config))
+
+    assert db.get_setting(config.db_path, LLM_BACKEND_KEY) is None
+    update.callback_query.message.edit_text.assert_not_awaited()
 
 
 # ---- auth gate ---------------------------------------------------------------

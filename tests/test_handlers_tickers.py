@@ -19,7 +19,7 @@ from naarad.config import (
     TickersConfig,
     WaterConfig,
 )
-from naarad.handlers.tickers import ticker_command
+from naarad.handlers.tickers import ticker_callback, ticker_command
 from naarad.runtime import TICKERS_FLAG_KEY
 
 
@@ -59,10 +59,34 @@ def _last_reply(update) -> str:
     return update.message.reply_text.await_args.args[0]
 
 
+def _last_reply_markup(update):
+    return update.message.reply_text.await_args.kwargs.get("reply_markup")
+
+
+def _kb_button_texts(markup):
+    if markup is None:
+        return []
+    return [btn.text for row in markup.inline_keyboard for btn in row]
+
+
+def make_callback_update(data: str, chat_id: int = 42):
+    query = AsyncMock()
+    query.data = data
+    query.message = AsyncMock()
+    return SimpleNamespace(
+        effective_chat=SimpleNamespace(id=chat_id),
+        message=None,
+        callback_query=query,
+    )
+
+
 # ---- existing surface (add | remove | list) regression ----------------------
 
 @pytest.mark.asyncio
-async def test_no_args_shows_usage_with_on_off(tmp_path: Path) -> None:
+async def test_no_args_shows_panel_with_all_subcommands(tmp_path: Path) -> None:
+    """No-arg /ticker is a panel: state line, watchlist, and every
+    sub-command listed so the user doesn't have to guess at syntax.
+    """
     config = make_config(tmp_path)
     db.init_db(config.db_path)
     update = make_update()
@@ -70,8 +94,10 @@ async def test_no_args_shows_usage_with_on_off(tmp_path: Path) -> None:
     await ticker_command(update, make_context(config))
 
     text = _last_reply(update)
-    assert "Usage" in text
-    assert "/ticker on | off" in text
+    assert "Tickers: on" in text
+    assert "Watchlist" in text
+    for cmd in ("/ticker add", "/ticker remove", "/ticker list", "/ticker on", "/ticker off"):
+        assert cmd in text
 
 
 @pytest.mark.asyncio
@@ -158,7 +184,7 @@ async def test_off_disables_runtime_flag(tmp_path: Path) -> None:
 
     assert db.get_setting(config.db_path, TICKERS_FLAG_KEY) == "0"
     text = _last_reply(update)
-    assert "<b>off</b>" in text
+    assert "Tickers: off" in text
     assert "runtime" in text
 
 
@@ -173,7 +199,7 @@ async def test_on_enables_runtime_flag(tmp_path: Path) -> None:
 
     assert db.get_setting(config.db_path, TICKERS_FLAG_KEY) == "1"
     text = _last_reply(update)
-    assert "<b>on</b>" in text
+    assert "Tickers: on" in text
 
 
 @pytest.mark.asyncio
@@ -242,4 +268,56 @@ async def test_unauthorized_chat_is_silently_dropped(tmp_path: Path) -> None:
     await ticker_command(update, make_context(config, args=["off"]))
 
     update.message.reply_text.assert_not_awaited()
+    assert db.get_setting(config.db_path, TICKERS_FLAG_KEY) is None
+
+
+# ---- panel + callback paths -------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_panel_includes_watchlist_and_toggle_button(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    db.add_ticker(config.db_path, "GOOGL")
+    update = make_update()
+
+    await ticker_command(update, make_context(config))
+
+    text = _last_reply(update)
+    assert "GOOGL" in text
+    labels = _kb_button_texts(_last_reply_markup(update))
+    assert any("Disable" in lbl for lbl in labels)
+
+
+@pytest.mark.asyncio
+async def test_panel_has_no_buttons_when_no_eodhd_key(tmp_path: Path) -> None:
+    """Toggle is inert without an API key — skip the button."""
+    config = make_config(tmp_path, eodhd_key="")
+    db.init_db(config.db_path)
+    update = make_update()
+
+    await ticker_command(update, make_context(config))
+
+    assert _last_reply_markup(update) is None
+
+
+@pytest.mark.asyncio
+async def test_callback_toggle_flips_runtime_flag(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    update = make_callback_update("ticker:toggle")
+
+    await ticker_callback(update, make_context(config))
+
+    assert db.get_setting(config.db_path, TICKERS_FLAG_KEY) == "0"
+    update.callback_query.message.edit_text.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_callback_toggle_rejects_unauthorized(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    update = make_callback_update("ticker:toggle", chat_id=999)
+
+    await ticker_callback(update, make_context(config))
+
     assert db.get_setting(config.db_path, TICKERS_FLAG_KEY) is None

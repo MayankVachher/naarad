@@ -77,6 +77,16 @@ def build_application(config: Config) -> Application:
         welcome_handlers.welcome_button,
         pattern=f"^{welcome_handlers.WELCOME_BUTTON_CALLBACK}$",
     ))
+    # Panel-button callbacks for /llm and /ticker. One handler per
+    # command, routed by the verb suffix inside the callback itself.
+    app.add_handler(CallbackQueryHandler(
+        llm_handlers.llm_callback,
+        pattern=f"^{llm_handlers.LLM_CALLBACK_PREFIX}",
+    ))
+    app.add_handler(CallbackQueryHandler(
+        ticker_handlers.ticker_callback,
+        pattern=f"^{ticker_handlers.TICKER_CALLBACK_PREFIX}",
+    ))
     # Reply-to-reminder confirm. Exclude commands so /water doesn't double-fire.
     app.add_handler(MessageHandler(filters.REPLY & ~filters.COMMAND, water_handlers.water_reply))
 
