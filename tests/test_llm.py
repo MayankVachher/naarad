@@ -77,9 +77,13 @@ def test_copilot_flags_disable_tools_and_prompts():
 
 
 def test_claude_flags_lock_to_single_turn_no_tools():
-    """Claude Code CLI flags are camelCase per upstream reference."""
+    """Claude Code CLI flag naming is mixed upstream: --max-turns and
+    --output-format are kebab-case but --disallowedTools is camelCase.
+    See https://code.claude.com/docs/en/cli-reference.
+    """
     flags = CLAUDE.flags
-    assert "--maxTurns" in flags
+    assert "--max-turns" in flags
+    assert "--output-format" in flags
     assert "--disallowedTools" in flags
     # Disallowed list should at least include the dangerous ones.
     idx = flags.index("--disallowedTools")

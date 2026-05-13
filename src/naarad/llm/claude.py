@@ -15,9 +15,10 @@ from naarad.llm.runner import LLMBackend
 # request can't accidentally trigger a tool call. ``-p`` already implies
 # non-interactive mode but doesn't itself block tools.
 #
-# Claude Code CLI flag names are camelCase (--maxTurns, --disallowedTools,
-# --outputFormat) per the upstream reference; verify against
-# `claude --help` if a future CLI version drifts.
+# Claude Code CLI flag naming is *mixed*: `--max-turns` and
+# `--output-format` are kebab-case, but `--disallowedTools` /
+# `--allowedTools` are still camelCase upstream. Verify against
+# https://code.claude.com/docs/en/cli-reference if a future version drifts.
 _DISALLOWED = " ".join((
     "Bash", "Edit", "Write", "Read",
     "Glob", "Grep", "Task",
@@ -30,8 +31,8 @@ CLAUDE = LLMBackend(
     env_var="CLAUDE_BIN",
     default_bin="claude",
     flags=(
-        "--maxTurns", "1",
+        "--max-turns", "1",
         "--disallowedTools", _DISALLOWED,
-        "--outputFormat", "text",
+        "--output-format", "text",
     ),
 )
