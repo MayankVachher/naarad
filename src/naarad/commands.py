@@ -25,6 +25,7 @@ COMMAND_REFERENCE: tuple[CommandDoc, ...] = (
     CommandDoc("/brief", "Re-run today's morning brief on demand. Useful for prompt iteration."),
     CommandDoc("/llm on|off", "Toggle LLM-generated brief + water lines at runtime."),
     CommandDoc("/llm test", "Fire a one-shot prompt at the configured backend; reports ✓ + the model's line or ✗ + the reason."),
+    CommandDoc("/llm backend [copilot|claude]", "Show or change the LLM backend at runtime; overrides `llm.backend` until `state.db` is reset."),
     CommandDoc("/ticker add SYMBOL", "Track a new ticker (US bare, `.TO` suffix for TSX; symbol is validated)."),
     CommandDoc("/ticker remove SYMBOL", "Stop tracking a ticker."),
     CommandDoc("/ticker list", "List tracked tickers."),

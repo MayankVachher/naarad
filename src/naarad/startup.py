@@ -69,7 +69,8 @@ def _check_llm_backend(config: Config) -> None:
     already fall back to deterministic text, so a missing CLI degrades
     the bot but doesn't break it.
     """
-    backend = get_backend(config.llm.backend)
+    from naarad.runtime import get_llm_backend
+    backend = get_backend(get_llm_backend(config))
     bin_path = resolve_bin(backend)
     try:
         result = subprocess.run(

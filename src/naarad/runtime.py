@@ -30,6 +30,7 @@ from naarad import db
 from naarad.config import Config
 
 LLM_FLAG_KEY = "llm_enabled"
+LLM_BACKEND_KEY = "llm_backend"
 TICKERS_FLAG_KEY = "tickers_enabled"
 
 TickersOffReason = Literal["config", "no_key", "runtime"]
@@ -50,6 +51,49 @@ def set_llm_runtime(db_path: str | Path, enabled: bool) -> None:
     is a no-op effect-wise.
     """
     db.set_setting(db_path, LLM_FLAG_KEY, "1" if enabled else "0")
+
+
+def get_llm_backend(config: Config, db_path: str | Path | None = None) -> str:
+    """Return the effective LLM backend name.
+
+    DB-backed runtime override wins; otherwise falls back to
+    ``config.llm.backend``. An unknown or empty stored value falls
+    through too — config is the floor of trust.
+    """
+    # Late import: naarad.llm depends on naarad.runtime indirectly via
+    # the dispatch module, so importing at module load would create a
+    # cycle.
+    from naarad.llm import BACKENDS
+    path = db_path if db_path is not None else config.db_path
+    try:
+        override = db.get_setting(path, LLM_BACKEND_KEY, "") or ""
+    except Exception:
+        # DB missing / table not yet created (e.g. startup checks
+        # firing before init_db). Config is the floor of trust — degrade
+        # silently rather than raising on a read.
+        return config.llm.backend
+    if override and override in BACKENDS:
+        return override
+    return config.llm.backend
+
+
+def set_llm_backend(db_path: str | Path, name: str) -> None:
+    """Persist a runtime backend override. Validates against the known
+    backends; raises ValueError otherwise. Passing the same value as
+    ``config.llm.backend`` is allowed — clearing back to config is the
+    caller's responsibility via :func:`clear_llm_backend`.
+    """
+    from naarad.llm import BACKENDS
+    if name not in BACKENDS:
+        raise ValueError(
+            f"unknown LLM backend {name!r}; choose from {sorted(BACKENDS)}"
+        )
+    db.set_setting(db_path, LLM_BACKEND_KEY, name)
+
+
+def clear_llm_backend(db_path: str | Path) -> None:
+    """Drop the runtime backend override; fall back to ``config.llm.backend``."""
+    db.set_setting(db_path, LLM_BACKEND_KEY, "")
 
 
 def tickers_off_reason(

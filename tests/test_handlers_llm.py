@@ -200,6 +200,101 @@ async def test_llm_test_failure_path(tmp_path: Path, monkeypatch) -> None:
     assert "copilot CLI not found" in text
 
 
+# ---- /llm backend -----------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_backend_no_arg_shows_config_default(tmp_path: Path) -> None:
+    config = make_config(tmp_path)  # default backend = "copilot"
+    db.init_db(config.db_path)
+    update = make_update()
+
+    await llm_command(update, make_context(config, args=["backend"]))
+
+    text = _reply_text(update)
+    assert "copilot" in text
+    assert "config default" in text
+
+
+@pytest.mark.asyncio
+async def test_backend_set_to_other_persists_override(tmp_path: Path) -> None:
+    from naarad.runtime import LLM_BACKEND_KEY, get_llm_backend
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    update = make_update()
+
+    await llm_command(update, make_context(config, args=["backend", "claude"]))
+
+    assert db.get_setting(config.db_path, LLM_BACKEND_KEY) == "claude"
+    assert get_llm_backend(config, config.db_path) == "claude"
+    text = _reply_text(update)
+    assert "claude" in text
+    assert "runtime override" in text
+
+
+@pytest.mark.asyncio
+async def test_backend_set_to_config_default_clears_override(tmp_path: Path) -> None:
+    from naarad.runtime import LLM_BACKEND_KEY
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    # Seed an existing override that we expect this command to clear.
+    db.set_setting(config.db_path, LLM_BACKEND_KEY, "claude")
+    update = make_update()
+
+    await llm_command(update, make_context(config, args=["backend", "copilot"]))
+
+    # Override was the config default → cleared (stored as empty string).
+    assert (db.get_setting(config.db_path, LLM_BACKEND_KEY) or "") == ""
+    text = _reply_text(update)
+    assert "reverted" in text
+
+
+@pytest.mark.asyncio
+async def test_backend_rejects_unknown(tmp_path: Path) -> None:
+    from naarad.runtime import LLM_BACKEND_KEY
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    update = make_update()
+
+    await llm_command(update, make_context(config, args=["backend", "gpt4"]))
+
+    text = _reply_text(update)
+    assert "Unknown backend" in text
+    # DB untouched.
+    assert db.get_setting(config.db_path, LLM_BACKEND_KEY) is None
+
+
+@pytest.mark.asyncio
+async def test_backend_refused_when_config_floor_off(tmp_path: Path) -> None:
+    from naarad.runtime import LLM_BACKEND_KEY
+    config = make_config(tmp_path, llm_enabled=False)
+    db.init_db(config.db_path)
+    update = make_update()
+
+    await llm_command(update, make_context(config, args=["backend", "claude"]))
+
+    text = _reply_text(update)
+    assert "config" in text
+    assert db.get_setting(config.db_path, LLM_BACKEND_KEY) is None
+
+
+# ---- /llm shows test + backend in state -------------------------------------
+
+@pytest.mark.asyncio
+async def test_state_output_mentions_test_and_backend(tmp_path: Path) -> None:
+    """Regression: `test` and `backend` should appear in /llm's no-arg help
+    so the user doesn't have to guess at sub-commands.
+    """
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    update = make_update()
+
+    await llm_command(update, make_context(config))
+
+    text = _reply_text(update)
+    assert "/llm test" in text
+    assert "Backend:" in text
+
+
 # ---- auth gate ---------------------------------------------------------------
 
 @pytest.mark.asyncio

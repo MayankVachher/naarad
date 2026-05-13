@@ -45,6 +45,7 @@ All commands are also surfaced in Telegram's `/` autocomplete menu
 | `/brief` | Re-run today's morning brief on demand. Useful for prompt iteration. |
 | `/llm on\|off` | Toggle LLM-generated brief + water lines at runtime. |
 | `/llm test` | Fire a one-shot prompt at the configured backend; reports ✓ + the model's line or ✗ + the reason. |
+| `/llm backend [copilot\|claude]` | Show or change the LLM backend at runtime; overrides `llm.backend` until `state.db` is reset. |
 | `/ticker add SYMBOL` | Track a new ticker (US bare, `.TO` suffix for TSX; symbol is validated). |
 | `/ticker remove SYMBOL` | Stop tracking a ticker. |
 | `/ticker list` | List tracked tickers. |

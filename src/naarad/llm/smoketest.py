@@ -13,6 +13,7 @@ import logging
 
 from naarad.config import Config
 from naarad.llm import get_backend, run_llm
+from naarad.runtime import get_llm_backend
 from naarad.water.prompt import first_nonempty_line
 
 log = logging.getLogger(__name__)
@@ -39,7 +40,7 @@ async def run_smoketest(config: Config) -> tuple[bool, str]:
     output). Never raises.
     """
     try:
-        backend = get_backend(config.llm.backend)
+        backend = get_backend(get_llm_backend(config))
     except Exception as exc:  # noqa: BLE001
         return False, f"unknown backend: {exc}"
 

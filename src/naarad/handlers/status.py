@@ -10,7 +10,7 @@ from telegram.ext import ContextTypes
 from naarad import db
 from naarad.config import Config
 from naarad.handlers.auth import reject_unauthorized
-from naarad.runtime import is_llm_enabled, tickers_off_reason
+from naarad.runtime import get_llm_backend, is_llm_enabled, tickers_off_reason
 from naarad.water.messages import pace_status
 from naarad.water.scheduler import water_config_from
 from naarad.water.state import (
@@ -26,7 +26,7 @@ HELP_TEXT = (
     "<b>Naarad commands</b>\n"
     "/water — confirm you drank water (resets the chain)\n"
     "/brief — re-run today's morning brief on demand\n"
-    "/llm on|off — toggle LLM features at runtime\n"
+    "/llm on|off|test|backend — toggle, smoke-test, or swap backend at runtime\n"
     "/ticker add|remove|list|on|off — manage the watchlist + kill switch\n"
     "/quote SYMBOL — on-demand real-time quote\n"
     "/status — bot health: water, day, LLM, tickers\n"
@@ -139,14 +139,20 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     )
 
     # LLM section: distinguish config-disabled vs runtime-disabled so the
-    # user knows which lever flips it back on.
-    backend = config.llm.backend
+    # user knows which lever flips it back on. The backend shown is the
+    # effective one (runtime override wins over `llm.backend`); a small
+    # suffix flags an active override.
+    effective = get_llm_backend(config, config.db_path)
+    overridden = effective != config.llm.backend
+    backend_label = html.escape(effective)
+    if overridden:
+        backend_label += f" <i>(override; config: {html.escape(config.llm.backend)})</i>"
     if not config.llm.enabled:
         llm_line = "<b>off</b> (config)"
     elif is_llm_enabled(config, config.db_path):
-        llm_line = f"<b>on</b> ({html.escape(backend)})"
+        llm_line = f"<b>on</b> ({backend_label})"
     else:
-        llm_line = f"<b>off</b> (runtime) — backend: {html.escape(backend)}"
+        llm_line = f"<b>off</b> (runtime) — backend: {backend_label}"
 
     reason = tickers_off_reason(config, config.db_path)
     tickers_state = {

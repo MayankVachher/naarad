@@ -228,6 +228,21 @@ async def test_llm_on_shows_backend(tmp_path: Path) -> None:
     assert "<b>on</b> (copilot)" in text
 
 
+@pytest.mark.asyncio
+async def test_llm_backend_override_is_flagged(tmp_path: Path) -> None:
+    from naarad.runtime import set_llm_backend
+    config = make_config(tmp_path)  # default backend = copilot
+    db.init_db(config.db_path)
+    set_llm_backend(config.db_path, "claude")
+    update = make_update()
+
+    await status_command(update, make_context(config))
+    text = _reply(update)
+    assert "claude" in text
+    assert "override" in text
+    assert "config: copilot" in text
+
+
 # ---- tickers section --------------------------------------------------------
 
 @pytest.mark.asyncio

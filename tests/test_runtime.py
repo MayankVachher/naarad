@@ -237,3 +237,56 @@ def test_off_reason_runtime_when_only_runtime_off(tmp_path: Path) -> None:
     db.init_db(config.db_path)
     set_tickers_runtime(config.db_path, enabled=False)
     assert tickers_off_reason(config) == "runtime"
+
+
+# ---- LLM backend override ---------------------------------------------------
+
+def test_backend_defaults_to_config_when_no_override(tmp_path: Path) -> None:
+    from naarad.runtime import get_llm_backend
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    assert get_llm_backend(config) == "copilot"  # config.llm.backend default
+
+
+def test_backend_override_wins_when_set(tmp_path: Path) -> None:
+    from naarad.runtime import get_llm_backend, set_llm_backend
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    set_llm_backend(config.db_path, "claude")
+    assert get_llm_backend(config) == "claude"
+
+
+def test_backend_set_rejects_unknown(tmp_path: Path) -> None:
+    from naarad.runtime import set_llm_backend
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    with pytest.raises(ValueError):
+        set_llm_backend(config.db_path, "gpt4")
+
+
+def test_backend_clear_drops_override(tmp_path: Path) -> None:
+    from naarad.runtime import clear_llm_backend, get_llm_backend, set_llm_backend
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    set_llm_backend(config.db_path, "claude")
+    clear_llm_backend(config.db_path)
+    assert get_llm_backend(config) == "copilot"
+
+
+def test_backend_invalid_override_falls_through_to_config(tmp_path: Path) -> None:
+    """Stored garbage shouldn't break the bot; config is the floor of trust."""
+    from naarad.runtime import LLM_BACKEND_KEY, get_llm_backend
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    db.set_setting(config.db_path, LLM_BACKEND_KEY, "gpt4")
+    assert get_llm_backend(config) == "copilot"
+
+
+def test_backend_resilient_when_db_uninitialized(tmp_path: Path) -> None:
+    """get_llm_backend must not raise even if settings table doesn't exist;
+    startup checks call it before init_db.
+    """
+    from naarad.runtime import get_llm_backend
+    config = make_config(tmp_path)
+    # Note: no db.init_db — the file doesn't exist.
+    assert get_llm_backend(config) == "copilot"

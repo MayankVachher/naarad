@@ -46,10 +46,12 @@ class LLMTask:
 
 
 def _resolve_backend(config: Config) -> LLMBackend:
-    # Local import keeps the module-import graph acyclic: __init__.py
-    # imports render, render imports get_backend.
+    # Local imports keep the module-import graph acyclic: __init__.py
+    # imports render, render imports get_backend; runtime imports
+    # naarad.llm.BACKENDS to validate the override.
     from naarad.llm import get_backend
-    return get_backend(config.llm.backend)
+    from naarad.runtime import get_llm_backend
+    return get_backend(get_llm_backend(config))
 
 
 async def render(task: LLMTask, config: Config) -> str:
