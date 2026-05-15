@@ -27,15 +27,30 @@ from naarad.water import messages, scheduler
 from naarad.water.status import compute_water_status
 
 PANEL_LOG_CALLBACK = "water:panel_log"
-
-
-def _panel_keyboard() -> InlineKeyboardMarkup:
-    """Single-button keyboard for the /water status panel."""
-    return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("💧 Log glass", callback_data=PANEL_LOG_CALLBACK)]]
-    )
+PANEL_PAUSE_CALLBACK = "water:panel_pause"
+PANEL_RESUME_CALLBACK = "water:panel_resume"
 
 log = logging.getLogger(__name__)
+
+
+def _panel_keyboard(*, paused: bool) -> InlineKeyboardMarkup:
+    """Two-button keyboard for the /water status panel.
+
+    Always shows [💧 Log glass]; the second slot toggles between
+    [⏸ Pause] and [▶️ Resume] based on the current state so the user
+    only sees the action available right now.
+    """
+    pause_button = (
+        InlineKeyboardButton("▶️ Resume", callback_data=PANEL_RESUME_CALLBACK)
+        if paused
+        else InlineKeyboardButton("⏸ Pause", callback_data=PANEL_PAUSE_CALLBACK)
+    )
+    return InlineKeyboardMarkup(
+        [[
+            InlineKeyboardButton("💧 Log glass", callback_data=PANEL_LOG_CALLBACK),
+            pause_button,
+        ]]
+    )
 
 
 def _confirm_response(config: Config, logged_at: datetime | None = None) -> str:
@@ -52,6 +67,7 @@ def _confirm_response(config: Config, logged_at: datetime | None = None) -> str:
         deficit=view.pace_deficit,
         next_reminder_at=view.next_reminder_at,
         logged_at=logged_at,
+        paused=view.paused,
     )
 
 
@@ -67,7 +83,17 @@ def _status_response(config: Config) -> str:
         deficit=view.pace_deficit,
         next_reminder_at=view.next_reminder_at,
         day_started=view.day_started,
+        paused=view.paused,
     )
+
+
+def _panel_for(config: Config) -> InlineKeyboardMarkup:
+    """Convenience: build the panel keyboard with the current pause state.
+
+    Used by every code path that posts or edits the /water panel so the
+    pause/resume button always matches what the message says.
+    """
+    return _panel_keyboard(paused=compute_water_status(config).paused)
 
 
 async def water_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -77,13 +103,39 @@ async def water_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     # /water (no args) is read-only — status snapshot only. Logging takes
     # the explicit `/water log` form so a quick "where am I at" check
-    # can't accidentally reset the chain.
+    # can't accidentally reset the chain. `pause` / `resume` are explicit
+    # subcommands too — same logic: never silently mutate.
     args = context.args or []
-    if not args or args[0].lower() != "log":
+    verb = args[0].lower() if args else ""
+
+    if verb == "pause":
+        changed = await scheduler.pause_chain(context.application)
+        if update.message is not None:
+            note = "" if changed else " (already paused)"
+            await update.message.reply_text(
+                _status_response(config) + (f"\n{note.strip()}" if note else ""),
+                reply_markup=_panel_for(config),
+            )
+        return
+
+    if verb == "resume":
+        changed = await scheduler.resume_chain(context.application)
+        if update.message is not None:
+            note = "" if changed else " (already running)"
+            await update.message.reply_text(
+                _status_response(config) + (f"\n{note.strip()}" if note else ""),
+                reply_markup=_panel_for(config),
+            )
+        return
+
+    if verb != "log":
+        # Status snapshot. Treat any unknown verb as status too so a
+        # typo doesn't leak as "unknown command" — the panel + status
+        # text show what the bot understood.
         if update.message is not None:
             await update.message.reply_text(
                 _status_response(config),
-                reply_markup=_panel_keyboard(),
+                reply_markup=_panel_for(config),
             )
         return
 
@@ -163,13 +215,71 @@ async def water_panel_log(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     try:
         await query.message.edit_text(
             _status_response(config),
-            reply_markup=_panel_keyboard(),
+            reply_markup=_panel_for(config),
         )
     except Exception:
         log.exception("water panel-log: edit_text failed; sending fresh panel")
         await query.message.reply_text(
             _status_response(config),
-            reply_markup=_panel_keyboard(),
+            reply_markup=_panel_for(config),
+        )
+
+
+async def water_panel_pause(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Callback for the [⏸ Pause] panel button. Flips the pause flag,
+    cancels any parked reminder job, and re-renders the panel with the
+    new state (button label flips to [▶️ Resume]).
+    """
+    query = update.callback_query
+    if query is None or query.message is None:
+        return
+    if await reject_unauthorized(update, context):
+        return
+    try:
+        await query.answer()
+    except Exception:
+        log.debug("query.answer failed (likely stale tap)", exc_info=True)
+    config: Config = context.application.bot_data["config"]
+
+    await scheduler.pause_chain(context.application)
+    await _refresh_panel(query, config)
+
+
+async def water_panel_resume(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Callback for the [▶️ Resume] panel button. Clears the pause flag
+    and re-runs the scheduler loop (which may fire a reminder right
+    away if the anchor is overdue).
+    """
+    query = update.callback_query
+    if query is None or query.message is None:
+        return
+    if await reject_unauthorized(update, context):
+        return
+    try:
+        await query.answer()
+    except Exception:
+        log.debug("query.answer failed (likely stale tap)", exc_info=True)
+    config: Config = context.application.bot_data["config"]
+
+    await scheduler.resume_chain(context.application)
+    await _refresh_panel(query, config)
+
+
+async def _refresh_panel(query, config: Config) -> None:
+    """Edit the /water panel message in place with the latest status +
+    matching pause/resume button. Shared by the pause and resume
+    callback handlers.
+    """
+    try:
+        await query.message.edit_text(
+            _status_response(config),
+            reply_markup=_panel_for(config),
+        )
+    except Exception:
+        log.exception("water panel refresh: edit_text failed; sending fresh panel")
+        await query.message.reply_text(
+            _status_response(config),
+            reply_markup=_panel_for(config),
         )
 
 

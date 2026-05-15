@@ -80,6 +80,9 @@ _PACE_BADGES: dict[PaceStatus, str] = {
 }
 
 
+PAUSED_LINE = "⏸ Reminders paused — /water resume to re-enable."
+
+
 def confirm_response(
     *,
     glasses_today: int,
@@ -88,13 +91,18 @@ def confirm_response(
     deficit: float,
     next_reminder_at: datetime | None,
     logged_at: datetime | None = None,
+    paused: bool = False,
 ) -> str:
     """The text sent back after /water or the 💧 button tap. Multi-line,
     one fact per line:
 
       💧 Glass #N/T logged at HH:MM   (time suffix included when logged_at given)
       🟢 On track            (omitted when pace tracking is disabled)
-      ⏰ Next reminder at HH:MM    (or 🌙 No more reminders today.)
+      ⏰ Next reminder at HH:MM    (or 🌙 / ⏸ alternatives)
+
+    When ``paused`` is True the schedule line is replaced with the
+    paused-state hint — the pace badge still shows so the user can see
+    where they stand while paused.
     """
     # Line 1: count.
     if daily_target > 0:
@@ -112,8 +120,11 @@ def confirm_response(
     if badge:
         lines.append(badge)
 
-    # Line 3: next reminder time, or end-of-day note.
-    if next_reminder_at is None:
+    # Line 3: schedule state. Paused overrides next-reminder so the user
+    # doesn't see a clock time for a reminder that isn't going to fire.
+    if paused:
+        lines.append(PAUSED_LINE)
+    elif next_reminder_at is None:
         lines.append("🌙 No more reminders today.")
     else:
         lines.append(f"⏰ Next reminder at {next_reminder_at.strftime('%H:%M')}.")
@@ -129,6 +140,7 @@ def status_response(
     deficit: float,
     next_reminder_at: datetime | None,
     day_started: bool,
+    paused: bool = False,
 ) -> str:
     """Snapshot returned by ``/water`` (no args). The action is offered
     by the panel's inline button, so this text deliberately has no
@@ -147,7 +159,11 @@ def status_response(
     if badge:
         lines.append(badge)
 
-    if not day_started:
+    # Pause wins over day-not-started / end-of-day so the user always
+    # sees the actionable hint while paused.
+    if paused:
+        lines.append(PAUSED_LINE)
+    elif not day_started:
         lines.append("🌅 Day not started yet.")
     elif next_reminder_at is None:
         lines.append("🌙 No more reminders today.")

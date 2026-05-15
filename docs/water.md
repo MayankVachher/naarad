@@ -12,6 +12,10 @@ The water reminder chain runs during waking hours and escalates in interval and 
 
 After `water.active_end` (default 21:00) the bot goes quiet until next morning's start. Same once you hit `water.daily_target_glasses` for the day — no more nudges until tomorrow.
 
+## Manual pause
+
+Going into a meeting / workout / movie? `/water pause` (or the **⏸ Pause** button on the `/water` panel) stops reminders for the rest of today without touching your glass count or pace. `/water resume` (or the **▶️ Resume** button) brings them back; if you've been gone long enough, a reminder fires immediately. Tomorrow's day-start always begins unpaused — pause never carries across days.
+
 ## Pace-adjusted intervals
 
 Reminders run on a curve (`water.intervals_minutes`, default `[120, 60, 30, 15, 5]`), but the base interval is tightened when you fall behind the day's drinking pace.

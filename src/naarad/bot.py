@@ -72,6 +72,14 @@ def build_application(config: Config) -> Application:
         pattern=f"^{water_handlers.PANEL_LOG_CALLBACK}$",
     ))
     app.add_handler(CallbackQueryHandler(
+        water_handlers.water_panel_pause,
+        pattern=f"^{water_handlers.PANEL_PAUSE_CALLBACK}$",
+    ))
+    app.add_handler(CallbackQueryHandler(
+        water_handlers.water_panel_resume,
+        pattern=f"^{water_handlers.PANEL_RESUME_CALLBACK}$",
+    ))
+    app.add_handler(CallbackQueryHandler(
         morning_handlers.start_day_button,
         pattern=f"^{morning_handlers.START_DAY_CALLBACK}$",
     ))

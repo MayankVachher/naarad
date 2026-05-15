@@ -52,7 +52,9 @@ from naarad.water.state import (
     WaterState,
     apply_confirm,
     apply_day_started,
+    apply_pause,
     apply_reminder_sent,
+    apply_resume,
     next_action,
 )
 
@@ -85,6 +87,7 @@ def _state_from_db(config: Config) -> WaterState:
         day_started_on=raw["day_started_on"],
         chain_started_at=raw["chain_started_at"],
         glasses_today=raw["glasses_today"],
+        paused=raw["paused"],
     )
 
 
@@ -324,6 +327,7 @@ async def start_day(app: Application, *, skip_grace: bool = False) -> None:
                 level=0,
                 chain_started_at=new_state.chain_started_at,
                 glasses_today=0,
+                paused=new_state.paused,
             )
     # Lock released — run_loop will reacquire per transition.
     await run_loop(app)
@@ -336,6 +340,8 @@ async def confirm_drink(app: Application) -> int:
 
     Note: a confirm before day_start is silently ignored (no escalation
     runs), but glasses_today still increments — the user did drink.
+    Pause is intentionally NOT cleared by a confirm — pause means "don't
+    nudge me", not "stop counting"; the user clears it via /water resume.
     """
     config: Config = app.bot_data["config"]
     lock: asyncio.Lock = app.bot_data["water_lock"]
@@ -351,3 +357,39 @@ async def confirm_drink(app: Application) -> int:
         )
     await run_loop(app)
     return new_state.glasses_today
+
+
+async def pause_chain(app: Application) -> bool:
+    """Pause water reminders for the rest of today. Returns True if the
+    state changed (was running, now paused), False if it was already
+    paused. Cancels any parked water-loop job so no reminder fires while
+    paused; run_loop on resume reschedules from current anchors.
+    """
+    config: Config = app.bot_data["config"]
+    lock: asyncio.Lock = app.bot_data["water_lock"]
+    async with lock:
+        state = _state_from_db(config)
+        if state.paused:
+            return False
+        new_state = apply_pause(state)
+        db.update_water_state(config.db_path, paused=new_state.paused)
+        _cancel_existing_job(app)
+    return True
+
+
+async def resume_chain(app: Application) -> bool:
+    """Clear the pause flag and re-enter the loop. Returns True if the
+    state changed (was paused, now running), False if it wasn't paused.
+    run_loop will reschedule (or fire immediately if the anchor is
+    already overdue).
+    """
+    config: Config = app.bot_data["config"]
+    lock: asyncio.Lock = app.bot_data["water_lock"]
+    async with lock:
+        state = _state_from_db(config)
+        if not state.paused:
+            return False
+        new_state = apply_resume(state)
+        db.update_water_state(config.db_path, paused=new_state.paused)
+    await run_loop(app)
+    return True

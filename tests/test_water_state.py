@@ -13,7 +13,9 @@ from naarad.water.state import (
     WaterState,
     apply_confirm,
     apply_day_started,
+    apply_pause,
     apply_reminder_sent,
+    apply_resume,
     next_action,
 )
 
@@ -419,3 +421,108 @@ def test_anchor_uses_reminder_when_more_recent():
     # Anchor 14:00, level=2 -> 14:00 + 30min = 14:30
     action = next_action(state, at(2026, 5, 2, 14, 1), CFG)
     assert action == Sleep(at(2026, 5, 2, 14, 30))
+
+
+# ---------- Pause flag ----------
+
+def test_paused_state_returns_idle_even_with_overdue_anchor():
+    """Pause overrides the normal schedule — an overdue anchor that would
+    otherwise fire Reminder must return Idle while paused.
+    """
+    state = WaterState(
+        day_started_on=date(2026, 5, 2),
+        last_drink_at=at(2026, 5, 2, 6, 0),  # 4h ago, well past base interval
+        level=0,
+        paused=True,
+    )
+    action = next_action(state, at(2026, 5, 2, 10, 0), CFG)
+    assert isinstance(action, Idle)
+
+
+def test_paused_overrides_first_of_day_immediate_reminder():
+    """If the user pauses right after day_start (before any drink or
+    reminder), the first-of-day Reminder(0) path is suppressed too.
+    """
+    state = WaterState(day_started_on=date(2026, 5, 2), level=0, paused=True)
+    action = next_action(state, at(2026, 5, 2, 8, 30), CFG)
+    assert isinstance(action, Idle)
+
+
+def test_apply_pause_flips_only_paused():
+    """apply_pause must preserve anchors + level + count so resume can
+    pick the chain back up where it left off.
+    """
+    state = WaterState(
+        day_started_on=date(2026, 5, 2),
+        last_drink_at=at(2026, 5, 2, 10, 0),
+        last_reminder_at=at(2026, 5, 2, 11, 0),
+        level=2,
+        glasses_today=3,
+    )
+    paused = apply_pause(state)
+    assert paused.paused is True
+    assert paused.level == state.level
+    assert paused.last_drink_at == state.last_drink_at
+    assert paused.last_reminder_at == state.last_reminder_at
+    assert paused.glasses_today == state.glasses_today
+
+
+def test_apply_resume_clears_paused_and_keeps_anchors():
+    state = WaterState(
+        day_started_on=date(2026, 5, 2),
+        last_drink_at=at(2026, 5, 2, 10, 0),
+        level=2,
+        paused=True,
+    )
+    resumed = apply_resume(state)
+    assert resumed.paused is False
+    assert resumed.level == 2
+    assert resumed.last_drink_at == at(2026, 5, 2, 10, 0)
+
+
+def test_resume_fires_overdue_reminder_immediately():
+    """After resume, an overdue anchor must fire Reminder right away —
+    not wait for the next interval.
+    """
+    state = WaterState(
+        day_started_on=date(2026, 5, 2),
+        last_drink_at=at(2026, 5, 2, 6, 0),
+        level=0,
+        paused=True,
+    )
+    resumed = apply_resume(state)
+    action = next_action(resumed, at(2026, 5, 2, 10, 0), CFG)
+    assert action == Reminder(level=0)
+
+
+def test_apply_day_started_clears_paused():
+    """Tomorrow's day-start always begins unpaused, even if yesterday
+    ended paused.
+    """
+    state = WaterState(
+        day_started_on=date(2026, 5, 1),
+        last_drink_at=at(2026, 5, 1, 18, 0),
+        level=3,
+        glasses_today=5,
+        paused=True,
+    )
+    fresh = apply_day_started(state, date(2026, 5, 2), at(2026, 5, 2, 6, 0))
+    assert fresh.paused is False
+    assert fresh.day_started_on == date(2026, 5, 2)
+    assert fresh.glasses_today == 0
+    assert fresh.level == 0
+
+
+def test_apply_confirm_does_not_clear_pause():
+    """Logging a glass while paused bumps the counter but keeps pause on
+    — pause means 'don't nudge me', not 'stop counting'.
+    """
+    state = WaterState(
+        day_started_on=date(2026, 5, 2),
+        last_drink_at=at(2026, 5, 2, 9, 0),
+        glasses_today=2,
+        paused=True,
+    )
+    confirmed = apply_confirm(state, at(2026, 5, 2, 10, 0))
+    assert confirmed.paused is True
+    assert confirmed.glasses_today == 3

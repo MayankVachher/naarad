@@ -22,6 +22,8 @@ class CommandDoc:
 
 COMMAND_REFERENCE: tuple[CommandDoc, ...] = (
     CommandDoc("/water", "Confirm you drank water (resets the chain and bumps the day's glass count)."),
+    CommandDoc("/water pause", "Stop water reminders for the rest of today. Tomorrow's day-start always re-enables them."),
+    CommandDoc("/water resume", "Re-enable water reminders after a `/water pause`."),
     CommandDoc("/brief", "Re-run today's morning brief on demand. Useful for prompt iteration."),
     CommandDoc("/llm on|off", "Toggle LLM-generated brief + water lines at runtime."),
     CommandDoc("/llm test", "Fire a one-shot prompt at the configured backend; reports ✓ + the model's line or ✗ + the reason."),

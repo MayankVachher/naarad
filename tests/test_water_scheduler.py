@@ -505,3 +505,139 @@ async def test_confirm_during_render_discards_rendered_line(
     state = db.get_water_state(cfg.db_path)
     assert state["last_drink_at"] == datetime(2026, 5, 2, 12, 0, tzinfo=TZ)
     assert state["level"] == 0
+
+
+# ---------- Pause / resume ----------
+
+@pytest.mark.asyncio
+async def test_pause_chain_sets_flag_and_cancels_job(app, freeze_now, monkeypatch):
+    """pause_chain on a running day must flip paused=True in DB and call
+    schedule_removal on any parked water-loop job (recorded via FakeJobQueue).
+    Subsequent kickoff is Idle while paused.
+    """
+    cfg = app.bot_data["config"]
+    freeze_now["now"] = datetime(2026, 5, 2, 8, 30, tzinfo=TZ)
+    await water_scheduler.start_day(app)
+    # After start_day, a water-loop job is parked at 08:33 (grace).
+
+    # Replace FakeJobQueue.get_jobs_by_name to expose the parked job so
+    # _cancel_existing_job can schedule_removal it. The default fake
+    # returns [] (no persistence), which would silently miss cancellation.
+    removed: list[str] = []
+
+    class FakeJob:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def schedule_removal(self) -> None:
+            removed.append(self.name)
+
+    app.job_queue.get_jobs_by_name = lambda name: (  # type: ignore[assignment]
+        [FakeJob(name)] if name == water_scheduler.JOB_NAME else []
+    )
+
+    changed = await water_scheduler.pause_chain(app)
+    assert changed is True
+    assert removed == [water_scheduler.JOB_NAME]
+    assert db.get_water_state(cfg.db_path)["paused"] is True
+
+
+@pytest.mark.asyncio
+async def test_pause_chain_is_idempotent(app, freeze_now):
+    """Calling pause_chain a second time returns False and leaves state alone."""
+    cfg = app.bot_data["config"]
+    freeze_now["now"] = datetime(2026, 5, 2, 8, 30, tzinfo=TZ)
+    await water_scheduler.start_day(app)
+
+    assert await water_scheduler.pause_chain(app) is True
+    assert await water_scheduler.pause_chain(app) is False
+    assert db.get_water_state(cfg.db_path)["paused"] is True
+
+
+@pytest.mark.asyncio
+async def test_paused_loop_is_idle_and_schedules_nothing(app, freeze_now):
+    """While paused, run_loop must send no message and park no job."""
+    cfg = app.bot_data["config"]
+    freeze_now["now"] = datetime(2026, 5, 2, 8, 30, tzinfo=TZ)
+    await water_scheduler.start_day(app)
+    await water_scheduler.pause_chain(app)
+
+    app.bot.sent.clear()
+    app.job_queue.scheduled.clear()
+    freeze_now["now"] = datetime(2026, 5, 2, 12, 0, tzinfo=TZ)  # would normally fire
+    await water_scheduler.run_loop(app)
+
+    assert app.bot.sent == []
+    assert app.job_queue.scheduled == []
+    assert db.get_water_state(cfg.db_path)["paused"] is True
+
+
+@pytest.mark.asyncio
+async def test_resume_chain_fires_overdue_reminder(app, freeze_now):
+    """resume_chain on a chain with an overdue anchor must immediately
+    fire a reminder (anchor is older than the base interval).
+    """
+    cfg = app.bot_data["config"]
+    freeze_now["now"] = datetime(2026, 5, 2, 8, 30, tzinfo=TZ)
+    await water_scheduler.start_day(app, skip_grace=True)  # fires first reminder
+    await water_scheduler.pause_chain(app)
+    app.bot.sent.clear()
+
+    # Jump 3 hours: anchor (08:30 reminder) is now well past the level-1
+    # base interval (60 min). Resume should fire immediately.
+    freeze_now["now"] = datetime(2026, 5, 2, 11, 30, tzinfo=TZ)
+    changed = await water_scheduler.resume_chain(app)
+
+    assert changed is True
+    assert db.get_water_state(cfg.db_path)["paused"] is False
+    reminders = [m for m in app.bot.sent if "💧" in m["text"]]
+    assert len(reminders) >= 1
+
+
+@pytest.mark.asyncio
+async def test_resume_chain_is_idempotent(app, freeze_now):
+    """resume_chain on a non-paused chain returns False and is a no-op."""
+    cfg = app.bot_data["config"]
+    freeze_now["now"] = datetime(2026, 5, 2, 8, 30, tzinfo=TZ)
+    await water_scheduler.start_day(app)
+
+    assert db.get_water_state(cfg.db_path)["paused"] is False
+    assert await water_scheduler.resume_chain(app) is False
+
+
+@pytest.mark.asyncio
+async def test_confirm_while_paused_keeps_pause(app, freeze_now):
+    """A glass logged while paused bumps the counter but pause stays —
+    matches the apply_confirm semantics from the state-machine tests.
+    """
+    cfg = app.bot_data["config"]
+    freeze_now["now"] = datetime(2026, 5, 2, 8, 30, tzinfo=TZ)
+    await water_scheduler.start_day(app)
+    await water_scheduler.pause_chain(app)
+
+    glasses_before = db.get_water_state(cfg.db_path)["glasses_today"]
+    freeze_now["now"] = datetime(2026, 5, 2, 12, 0, tzinfo=TZ)
+    new_count = await water_scheduler.confirm_drink(app)
+
+    state = db.get_water_state(cfg.db_path)
+    assert state["paused"] is True
+    assert new_count == glasses_before + 1
+    assert state["glasses_today"] == glasses_before + 1
+
+
+@pytest.mark.asyncio
+async def test_start_day_clears_paused(app, freeze_now):
+    """Tomorrow's start_day must always begin unpaused, even if yesterday
+    ended paused.
+    """
+    cfg = app.bot_data["config"]
+    # Yesterday: started, paused, ended paused.
+    freeze_now["now"] = datetime(2026, 5, 1, 8, 30, tzinfo=TZ)
+    await water_scheduler.start_day(app)
+    await water_scheduler.pause_chain(app)
+    assert db.get_water_state(cfg.db_path)["paused"] is True
+
+    # Today: a fresh start_day fires.
+    freeze_now["now"] = datetime(2026, 5, 2, 8, 30, tzinfo=TZ)
+    await water_scheduler.start_day(app)
+    assert db.get_water_state(cfg.db_path)["paused"] is False

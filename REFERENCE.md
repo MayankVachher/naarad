@@ -42,6 +42,8 @@ All commands are also surfaced in Telegram's `/` autocomplete menu
 | Command | Description |
 |---------|-------------|
 | `/water` | Confirm you drank water (resets the chain and bumps the day's glass count). |
+| `/water pause` | Stop water reminders for the rest of today. Tomorrow's day-start always re-enables them. |
+| `/water resume` | Re-enable water reminders after a `/water pause`. |
 | `/brief` | Re-run today's morning brief on demand. Useful for prompt iteration. |
 | `/llm on\|off` | Toggle LLM-generated brief + water lines at runtime. |
 | `/llm test` | Fire a one-shot prompt at the configured backend; reports ✓ + the model's line or ✗ + the reason. |

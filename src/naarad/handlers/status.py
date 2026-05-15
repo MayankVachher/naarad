@@ -31,7 +31,8 @@ def _panel_keyboard() -> InlineKeyboardMarkup:
 
 HELP_TEXT = (
     "<b>Naarad commands</b>\n"
-    "/water — water status panel with a [💧 Log glass] button\n"
+    "/water — water status panel with [💧 Log glass] + [⏸ Pause/Resume] buttons\n"
+    "/water pause | resume — stop or resume water reminders for the rest of today\n"
     "/brief — re-run today's morning brief on demand\n"
     "/llm on|off|test|backend — toggle, smoke-test, or swap backend at runtime\n"
     "/ticker add|remove|list|on|off — manage the watchlist + kill switch\n"
@@ -68,6 +69,7 @@ def _describe_next_action(
     day_started: bool,
     target_hit: bool,
     past_active_end: bool,
+    paused: bool,
 ) -> str:
     """Single-line summary of the next-reminder state for /status."""
     if isinstance(action, Reminder):
@@ -75,6 +77,11 @@ def _describe_next_action(
     if isinstance(action, Sleep):
         return action.until.strftime("%H:%M %Z")
     if isinstance(action, Idle):
+        # Pause is checked first so an explicit user action wins over
+        # ambient end-of-day reasons (e.g., paused at 21:30 reads
+        # 'paused' rather than 'active hours ended').
+        if paused:
+            return "⏸ paused"
         if not day_started:
             return "day not started"
         if target_hit:
@@ -97,6 +104,7 @@ def _format_status(config: Config) -> str:
         day_started=view.day_started,
         target_hit=view.target_hit,
         past_active_end=view.past_active_end,
+        paused=view.paused,
     )
 
     # Pace badge — shares vocabulary with the confirm reply so /status

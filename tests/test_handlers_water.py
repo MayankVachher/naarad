@@ -286,3 +286,185 @@ async def test_water_command_unauthorized_dropped(tmp_path):
     message.reply_text.assert_not_awaited()
     # State untouched.
     assert db.get_water_state(config.db_path)["glasses_today"] == 0
+
+
+# ---- /water pause / resume --------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_water_pause_command_sets_flag(tmp_path):
+    """`/water pause` flips paused=True and replies with a status that
+    surfaces the paused state.
+    """
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    db.update_water_state(
+        config.db_path,
+        day_started_on=date(2026, 5, 2),
+        chain_started_at=datetime(2026, 5, 2, 8, 30, tzinfo=TZ),
+    )
+    app = make_application(config)
+    ctx = make_context(app, args=["pause"])
+
+    message = AsyncMock()
+    update = SimpleNamespace(
+        effective_chat=SimpleNamespace(id=42),
+        message=message,
+        callback_query=None,
+    )
+
+    await water_handlers.water_command(update, ctx)
+
+    assert db.get_water_state(config.db_path)["paused"] is True
+    message.reply_text.assert_awaited_once()
+    text = message.reply_text.await_args.args[0]
+    assert "paused" in text.lower()
+    # Panel button flips to Resume.
+    markup = message.reply_text.await_args.kwargs.get("reply_markup")
+    labels = [btn.text for row in markup.inline_keyboard for btn in row]
+    assert any("Resume" in lbl for lbl in labels)
+
+
+@pytest.mark.asyncio
+async def test_water_resume_command_clears_flag(tmp_path):
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    db.update_water_state(
+        config.db_path,
+        day_started_on=date(2026, 5, 2),
+        chain_started_at=datetime(2026, 5, 2, 8, 30, tzinfo=TZ),
+        paused=True,
+    )
+    app = make_application(config)
+    ctx = make_context(app, args=["resume"])
+
+    message = AsyncMock()
+    update = SimpleNamespace(
+        effective_chat=SimpleNamespace(id=42),
+        message=message,
+        callback_query=None,
+    )
+
+    await water_handlers.water_command(update, ctx)
+
+    assert db.get_water_state(config.db_path)["paused"] is False
+    message.reply_text.assert_awaited_once()
+    markup = message.reply_text.await_args.kwargs.get("reply_markup")
+    labels = [btn.text for row in markup.inline_keyboard for btn in row]
+    assert any("Pause" in lbl for lbl in labels)
+
+
+@pytest.mark.asyncio
+async def test_water_pause_is_idempotent_with_already_paused_hint(tmp_path):
+    """A second `/water pause` while already paused appends an
+    '(already paused)' hint so the user gets feedback that nothing changed.
+    """
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    db.update_water_state(
+        config.db_path,
+        day_started_on=date(2026, 5, 2),
+        chain_started_at=datetime(2026, 5, 2, 8, 30, tzinfo=TZ),
+        paused=True,
+    )
+    app = make_application(config)
+    ctx = make_context(app, args=["pause"])
+
+    message = AsyncMock()
+    update = SimpleNamespace(
+        effective_chat=SimpleNamespace(id=42),
+        message=message,
+        callback_query=None,
+    )
+
+    await water_handlers.water_command(update, ctx)
+
+    text = message.reply_text.await_args.args[0]
+    assert "already paused" in text.lower()
+
+
+@pytest.mark.asyncio
+async def test_water_no_args_shows_resume_button_when_paused(tmp_path):
+    """Status panel must show Resume (not Pause) when state.paused=True."""
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    db.update_water_state(
+        config.db_path,
+        day_started_on=date(2026, 5, 2),
+        chain_started_at=datetime(2026, 5, 2, 8, 30, tzinfo=TZ),
+        paused=True,
+    )
+    app = make_application(config)
+    ctx = make_context(app)  # no args → status path
+
+    message = AsyncMock()
+    update = SimpleNamespace(
+        effective_chat=SimpleNamespace(id=42),
+        message=message,
+        callback_query=None,
+    )
+
+    await water_handlers.water_command(update, ctx)
+
+    markup = message.reply_text.await_args.kwargs.get("reply_markup")
+    labels = [btn.text for row in markup.inline_keyboard for btn in row]
+    assert any("Resume" in lbl for lbl in labels)
+    assert not any("⏸ Pause" in lbl for lbl in labels)
+
+
+@pytest.mark.asyncio
+async def test_water_panel_pause_button_pauses(tmp_path):
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    db.update_water_state(
+        config.db_path,
+        day_started_on=date(2026, 5, 2),
+        chain_started_at=datetime(2026, 5, 2, 8, 30, tzinfo=TZ),
+    )
+    app = make_application(config)
+    ctx = make_context(app)
+
+    query = AsyncMock()
+    query.message = AsyncMock()
+    update = SimpleNamespace(
+        effective_chat=SimpleNamespace(id=42),
+        message=None,
+        callback_query=query,
+    )
+
+    await water_handlers.water_panel_pause(update, ctx)
+
+    assert db.get_water_state(config.db_path)["paused"] is True
+    query.message.edit_text.assert_awaited_once()
+    markup = query.message.edit_text.await_args.kwargs.get("reply_markup")
+    labels = [btn.text for row in markup.inline_keyboard for btn in row]
+    assert any("Resume" in lbl for lbl in labels)
+
+
+@pytest.mark.asyncio
+async def test_water_panel_resume_button_resumes(tmp_path):
+    config = make_config(tmp_path)
+    db.init_db(config.db_path)
+    db.update_water_state(
+        config.db_path,
+        day_started_on=date(2026, 5, 2),
+        chain_started_at=datetime(2026, 5, 2, 8, 30, tzinfo=TZ),
+        paused=True,
+    )
+    app = make_application(config)
+    ctx = make_context(app)
+
+    query = AsyncMock()
+    query.message = AsyncMock()
+    update = SimpleNamespace(
+        effective_chat=SimpleNamespace(id=42),
+        message=None,
+        callback_query=query,
+    )
+
+    await water_handlers.water_panel_resume(update, ctx)
+
+    assert db.get_water_state(config.db_path)["paused"] is False
+    query.message.edit_text.assert_awaited_once()
+    markup = query.message.edit_text.await_args.kwargs.get("reply_markup")
+    labels = [btn.text for row in markup.inline_keyboard for btn in row]
+    assert any("Pause" in lbl for lbl in labels)

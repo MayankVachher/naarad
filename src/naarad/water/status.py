@@ -34,7 +34,9 @@ class WaterStatusView:
     ``action`` is the raw next-action so renderers (notably /status) can
     distinguish Idle-because-target-hit from Idle-because-active-hours-ended;
     ``next_reminder_at`` is the convenience form for renderers that only
-    care about a clock time.
+    care about a clock time. ``paused`` is the *raw* flag — note that an
+    Idle ``action`` can mean paused, target-hit, past active_end, or day
+    not started, so renderers should consult both fields.
     """
     now: datetime
     glasses: int
@@ -44,6 +46,7 @@ class WaterStatusView:
     day_started: bool
     target_hit: bool
     past_active_end: bool
+    paused: bool
     level: int
     last_drink_at: datetime | None
     action: NextAction
@@ -61,6 +64,7 @@ def compute_water_status(config: Config) -> WaterStatusView:
         day_started_on=raw["day_started_on"],
         chain_started_at=raw["chain_started_at"],
         glasses_today=raw["glasses_today"],
+        paused=raw["paused"],
     )
     wcfg = water_config_from(config)
     now = datetime.now(config.tz)
@@ -93,6 +97,7 @@ def compute_water_status(config: Config) -> WaterStatusView:
         day_started=day_started,
         target_hit=target_hit,
         past_active_end=past_active_end,
+        paused=raw["paused"],
         level=raw["level"],
         last_drink_at=raw["last_drink_at"],
         action=action,

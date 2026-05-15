@@ -49,6 +49,11 @@ class WaterState:
     # apply_day_started, incremented by apply_confirm. Surfaced back to
     # the user in the confirm response and the "✅ logged" edit.
     glasses_today: int = 0
+    # Same-day pause flag. While True, next_action returns Idle and the
+    # scheduler parks no jobs. Reset to False by apply_day_started, so
+    # tomorrow's chain always begins unpaused; flipped by apply_pause /
+    # apply_resume. Logging a glass does NOT clear it.
+    paused: bool = False
 
 
 @dataclass(frozen=True)
@@ -187,6 +192,13 @@ def next_action(state: WaterState, now: datetime, cfg: WaterConfig) -> Action:
     if state.day_started_on != today:
         return Idle()
 
+    # User paused the chain (via /water pause or the panel button).
+    # Same-day only — apply_day_started will clear paused so tomorrow's
+    # chain begins unpaused. While paused, the scheduler parks no jobs;
+    # /water resume kicks the loop back to life.
+    if state.paused:
+        return Idle()
+
     # Past end of active window: silent until tomorrow's start_day.
     if now >= end_today:
         return Idle()
@@ -238,7 +250,8 @@ def next_action(state: WaterState, now: datetime, cfg: WaterConfig) -> Action:
 def apply_day_started(state: WaterState, today: date, now: datetime) -> WaterState:
     """Morning Start fired (via tap or fallback): reset chain for the
     new day, stamp ``chain_started_at`` so next_action can apply the
-    first-reminder grace period, and zero the day's glass counter.
+    first-reminder grace period, zero the day's glass counter, and clear
+    any pause carried over from a previous day.
     """
     return replace(
         state,
@@ -248,7 +261,22 @@ def apply_day_started(state: WaterState, today: date, now: datetime) -> WaterSta
         level=0,
         chain_started_at=now,
         glasses_today=0,
+        paused=False,
     )
+
+
+def apply_pause(state: WaterState) -> WaterState:
+    """Flip the pause flag on. No other state change — anchor + level
+    are preserved so a resume picks the chain back up where it left off.
+    """
+    return replace(state, paused=True)
+
+
+def apply_resume(state: WaterState) -> WaterState:
+    """Flip the pause flag off. next_action then runs normally; if the
+    last reminder/drink was long enough ago, a reminder fires immediately.
+    """
+    return replace(state, paused=False)
 
 
 def apply_confirm(state: WaterState, now: datetime) -> WaterState:
